@@ -2182,11 +2182,14 @@ body.hc-eink .hc-root,
 body.hc-eink .hc-today-root {
   /* ponytail: flat 5% bump, not calibrated per device */
   font-size: 1.05em;
-  /* e-ink displays wash out low-contrast text under fast refresh; bump the
-     baseline so status/date/count text stays readable. True decorative
-     elements (icons, separators, placeholders) are restored below. */
-  --text-muted: var(--text-normal);
-  --text-faint: var(--text-normal);
+  /* e-ink displays wash out low-contrast text under fast refresh; raise the
+     baseline so status/date/count text stays readable. Blended toward full
+     contrast rather than fully replaced (that read as too flat/harsh on
+     device) — still keeps a hint of the normal/muted/faint hierarchy. True
+     decorative elements (icons, separators, placeholders) are restored
+     below. */
+  --text-muted: color-mix(in srgb, var(--text-normal) 70%, var(--hc-dim-muted));
+  --text-faint: color-mix(in srgb, var(--text-normal) 70%, var(--hc-dim-faint));
 }
 
 /* .hc-today-item-meta (class code + lecture/assignment type — load-bearing,
