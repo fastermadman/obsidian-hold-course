@@ -171,23 +171,32 @@ function getAllAssignments(semester) {
 // getAbstractFileByPath only checks Obsidian's in-memory vault index. On
 // mobile that index can lag behind disk after a sync tool (e.g. Syncthing)
 // writes a file — the note is real but not indexed yet, so the lookup
-// fails even though the file exists. There's no public API to force a
-// single-file reindex, and openLinkText() resolves through that same
-// stale index internally — calling it anyway risks it creating a new
+// fails even though the file exists. openLinkText() resolves through that
+// same stale index internally — calling it anyway risks it creating a new
 // empty note instead of finding the real one (the bug this pattern is
-// already guarding against). So when the index says "missing" but the
-// filesystem (adapter.exists) says "real", reload the app to force a
-// full reindex — same recovery viastudywiz-extension's sync script uses
-// for the sibling stale-cache problem (#127) — instead of just telling
-// the user to do it themselves. One more click on "Open note" after the
-// reload finishes will then succeed.
+// already guarding against).
+//
+// adapter.reconcileFile(path, path, false) forces the vault index to pick
+// up a single externally-written file without a full app reload — verified
+// against the obsidian-vault-file-refresh community plugin, which uses the
+// same call for the same problem. It's NOT in Obsidian's public API
+// (obsidian.d.ts has no reindex/reconcile method), so it's wrapped in a
+// try/catch: if a future Obsidian version removes or renames it, this
+// falls through to the full-reload path below instead of throwing.
 async function openVaultNote(app, path) {
-  const file = app.vault.getAbstractFileByPath(path);
+  let file = app.vault.getAbstractFileByPath(path);
+  if (!file && await app.vault.adapter.exists(path)) {
+    try {
+      await app.vault.adapter.reconcileFile(path, path, false);
+      file = app.vault.getAbstractFileByPath(path);
+    } catch (e) {
+      // private API — fall through to the reload path below
+    }
+  }
   if (file) {
     app.workspace.openLinkText(path, '', false);
   } else if (await app.vault.adapter.exists(path)) {
-    new Notice('Note not indexed yet — reloading...');
-    app.commands.executeCommandById('app:reload');
+    new ConfirmReloadModal(app).open();
   } else {
     new Notice('Note not found in vault.');
   }
@@ -3478,6 +3487,34 @@ class EditLectureModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+// Last-resort fallback in openVaultNote() when reconcileFile() didn't work
+// (or isn't available) and the note still isn't indexed. app:reload restarts
+// the whole app — safe for saved notes, but any unsaved edit elsewhere in
+// the vault is lost, so this asks first instead of firing automatically.
+class ConfirmReloadModal extends Modal {
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('hc-modal');
+    contentEl.createEl('h2', { cls: 'hc-modal-title', text: 'Reload Obsidian?' });
+    contentEl.createEl('p', {
+      cls: 'hc-modal-body',
+      text: 'This note exists but Obsidian hasn\'t indexed it yet. Reloading will fix that, but any unsaved changes elsewhere in the vault will be lost. Reload now?',
+    });
+
+    const footer = contentEl.createDiv('hc-modal-footer');
+    const cancelBtn = footer.createEl('button', { cls: 'hc-btn', text: 'Cancel' });
+    cancelBtn.addEventListener('click', () => this.close());
+    const reloadBtn = footer.createEl('button', { cls: 'hc-btn hc-btn--danger', text: 'Reload' });
+    reloadBtn.addEventListener('click', () => {
+      this.close();
+      this.app.commands.executeCommandById('app:reload');
+    });
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
 class DeleteLectureModal extends Modal {
   constructor(app, plugin, semesterId, classId, lec, onDelete) {
     super(app);
@@ -4425,3 +4462,10 @@ EditResourceModal.prototype._renderFooter   = _renderFooter;
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 module.exports = HoldCoursePlugin;
+
+// Obsidian only uses the default export; these are attached so pure logic
+// can be unit-tested without starting the app. See test/.
+Object.assign(module.exports, {
+  openVaultNote,
+  ConfirmReloadModal,
+});
