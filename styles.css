@@ -286,6 +286,11 @@
   border-radius: 10px;
   cursor: pointer;
   transition: border-color 0.15s;
+  /* Without this, a grid item's min-width defaults to its unclipped content
+     width, so a long next-assignment title pushes the card past the grid
+     track instead of ellipsis-truncating. Same guard .hc-today-col already
+     has for the today-strip grid. */
+  min-width: 0;
 }
 
 .hc-class-card:hover {
@@ -2216,15 +2221,21 @@ body.hc-eink .hc-resource-source-icon {
 
 /* --- Mobile layout ----------------------------------------------------------
    Obsidian sets body.is-mobile on phone/tablet; scoped there so desktop is
-   untouched, per #4. Flat size bump for readability + single-column reflow
-   for the two 2-col grids below phone width, where two columns leaves ~150px
-   per card/column and cramps class names and today-strip rows. The 7-col
-   calendar grid isn't reflowed — collapsing a calendar's day columns would
-   defeat the point of a calendar; it already shrinks via its own min-width:0
-   cells. */
+   untouched, per #4. User-adjustable scale (settings +/- stepper sets
+   --hc-mobile-scale, default 1.1) instead of a fixed guess — a flat 10% bump
+   turned out too subtle to judge on-device either way, so make it tunable.
+   `zoom` (not font-size) scales text, spacing and icons together, not just
+   text — Chromium-only, which covers desktop Obsidian (Electron) and Android
+   (this plugin's actual mobile target); no effect under Safari/iOS WebKit,
+   a known gap, not silently broken.
+   Single-column reflow for the two 2-col grids below phone width, where two
+   columns leaves ~150px per card/column and cramps class names and
+   today-strip rows. The 7-col calendar grid isn't reflowed — collapsing a
+   calendar's day columns would defeat the point of a calendar; it already
+   shrinks via its own min-width:0 cells. */
 .is-mobile .hc-root,
 .is-mobile .hc-today-root {
-  font-size: 1.1em;
+  zoom: var(--hc-mobile-scale, 1.1);
 }
 
 @media (max-width: 480px) {
@@ -2232,4 +2243,10 @@ body.hc-eink .hc-resource-source-icon {
   .is-mobile .hc-today-strip {
     grid-template-columns: 1fr;
   }
+}
+
+.hc-settings-scale-label {
+  min-width: 42px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }

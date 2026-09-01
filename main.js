@@ -346,8 +346,10 @@ function getCalItemStyle(item) {
 class HoldCoursePlugin extends Plugin {
   async onload() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
-    this.data.settings = this.data.settings || { einkMode: false };
+    this.data.settings = this.data.settings || { einkMode: false, mobileScale: 1.1 };
+    if (this.data.settings.mobileScale === undefined) this.data.settings.mobileScale = 1.1;
     this.applyEinkClass();
+    this.applyMobileScale();
 
     this.addSettingTab(new HoldCourseSettingTab(this.app, this));
 
@@ -413,6 +415,10 @@ class HoldCoursePlugin extends Plugin {
   applyEinkClass() {
     einkActive = this.data.settings.einkMode;
     document.body.classList.toggle('hc-eink', einkActive);
+  }
+
+  applyMobileScale() {
+    document.body.style.setProperty('--hc-mobile-scale', this.data.settings.mobileScale);
   }
 
   refreshAllViews() {
@@ -727,6 +733,27 @@ class HoldCourseSettingTab extends PluginSettingTab {
           this.plugin.refreshAllViews();
           await this.plugin.save();
         }));
+
+    const scaleSetting = new Setting(containerEl)
+      .setName('Mobile & tablet size')
+      .setDesc('Scales the mobile/tablet view — text, spacing and icons together — up or down in 10% steps. Desktop is unaffected.');
+
+    const minusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '−' });
+    const label = scaleSetting.controlEl.createSpan({
+      cls: 'hc-settings-scale-label',
+      text: `${Math.round(this.plugin.data.settings.mobileScale * 100)}%`,
+    });
+    const plusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '+' });
+
+    const step = async (delta) => {
+      const next = Math.min(1.5, Math.max(0.9, Math.round((this.plugin.data.settings.mobileScale + delta) * 10) / 10));
+      this.plugin.data.settings.mobileScale = next;
+      this.plugin.applyMobileScale();
+      await this.plugin.save();
+      label.setText(`${Math.round(next * 100)}%`);
+    };
+    minusBtn.addEventListener('click', () => step(-0.1));
+    plusBtn.addEventListener('click', () => step(0.1));
   }
 }
 
