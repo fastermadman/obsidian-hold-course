@@ -11,6 +11,7 @@ const {
   Menu,
   setIcon,
   FuzzySuggestModal,
+  Platform,
 } = require('obsidian');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -346,8 +347,9 @@ function getCalItemStyle(item) {
 class HoldCoursePlugin extends Plugin {
   async onload() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
-    this.data.settings = this.data.settings || { einkMode: false, mobileScale: 1.1 };
-    if (this.data.settings.mobileScale === undefined) this.data.settings.mobileScale = 1.1;
+    const defaultScale = Platform.isMobile ? 1.1 : 1.0;
+    this.data.settings = this.data.settings || { einkMode: false, mobileScale: defaultScale };
+    if (this.data.settings.mobileScale === undefined) this.data.settings.mobileScale = defaultScale;
     this.applyEinkClass();
     this.applyMobileScale();
 
@@ -735,8 +737,8 @@ class HoldCourseSettingTab extends PluginSettingTab {
         }));
 
     const scaleSetting = new Setting(containerEl)
-      .setName('Mobile & tablet size')
-      .setDesc('Scales the mobile/tablet view — text, spacing and icons together — up or down in 10% steps. Desktop is unaffected.');
+      .setName('Hold Course view size')
+      .setDesc('Scales the Hold Course panel — text, spacing and icons together — up or down in 10% steps. Applies on this device only.');
 
     const minusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '−' });
     const label = scaleSetting.controlEl.createSpan({
