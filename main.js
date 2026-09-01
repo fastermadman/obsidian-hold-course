@@ -3,6 +3,7 @@
 
 const {
   Plugin,
+  PluginSettingTab,
   ItemView,
   Modal,
   Setting,
@@ -36,6 +37,55 @@ const ASSIGNMENT_TYPE_STYLE = {
   'Other':      { color: '#666666', bg: '#F0F0F0' },
 };
 
+// Same hue as their COLOR_PALETTE/ASSIGNMENT_TYPE_STYLE counterpart, only
+// applied when E-ink display mode is on:
+// - COLOR_PALETTE accents: on a color screen the 6 accents are visually
+//   distinct, but several convert to nearly the same gray (e.g. coral/
+//   purple/pink all sit around luminance 0.10), making class color-coding
+//   useless on an e-ink screen. Re-lightened to 6 luminance steps between
+//   0.03-0.15 (the max an accent can be while still clearing 4.5:1 grayscale
+//   contrast against its own badge bg) and assigned zigzag across array
+//   order so any two adjacent classes get maximally separated grays.
+// - ASSIGNMENT_TYPE_STYLE colors: darkened just enough to clear 4.5:1
+//   grayscale text contrast against their badge bg — the other entries
+//   already clear it.
+const EINK_ACCENT_OVERRIDE = {
+  amber:  '#452B08',
+  teal:   '#0E6650',
+  coral:  '#712C15',
+  purple: '#5E56BC',
+  pink:   '#882F4C',
+  green:  '#427A13',
+};
+const EINK_TYPE_COLOR_OVERRIDE = { Writing: '#A95309', Project: '#476B9E', Discussion: '#597600' };
+// Fill-only variant of the accents above (class color bar/dot — no text sits
+// on top), used only when eink is on. Not bound by the 4.5:1 text-on-badge
+// ceiling that keeps EINK_ACCENT_OVERRIDE clustered around lum 0.03-0.15, so
+// these can spread across a much wider band (0.02-0.50) and stay genuinely
+// distinguishable from each other, while still reading against a white page.
+const EINK_FILL_OVERRIDE = {
+  amber:  '#372307',
+  teal:   '#0F6D55',
+  coral:  '#D7562B',
+  purple: '#958FD3',
+  pink:   '#DB97AE',
+  green:  '#72D221',
+};
+// getDueInfo()'s "overdue/today" red and "soon" amber sit at grayscale
+// contrast ~1.06:1 — indistinguishable on an e-ink screen. Darkened apart.
+const EINK_DUE_COLOR_OVERRIDE = { '#E24B4A': '#6A1211', '#BA7517': '#935D12' };
+// "upcoming" (>7 days out) normally uses var(--text-muted), which the eink
+// CSS (see styles.css body.hc-eink) already darkens close to --text-normal
+// for general readability — that would collapse it toward the same near-
+// black as the overdue override above, losing the 3-step urgency ladder.
+// Fixed mid-gray instead, distinct from both overdue and soon.
+const EINK_UPCOMING_COLOR = '#959595';
+let einkActive = false;
+
+function einkColor(hex) {
+  return (einkActive && EINK_DUE_COLOR_OVERRIDE[hex]) || hex;
+}
+
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const ASSIGNMENT_TYPES = ['Reading', 'Writing', 'Project', 'Discussion', 'Other'];
@@ -47,11 +97,19 @@ function generateId() {
 }
 
 function getColor(index) {
-  return COLOR_PALETTE[index % COLOR_PALETTE.length];
+  const c = COLOR_PALETTE[index % COLOR_PALETTE.length];
+  if (!einkActive) return { ...c, fill: c.accent };
+  return {
+    ...c,
+    accent: EINK_ACCENT_OVERRIDE[c.name] || c.accent,
+    fill: EINK_FILL_OVERRIDE[c.name] || c.accent,
+  };
 }
 
 function getTypeStyle(type) {
-  return ASSIGNMENT_TYPE_STYLE[type] || ASSIGNMENT_TYPE_STYLE['Other'];
+  const style = ASSIGNMENT_TYPE_STYLE[type] || ASSIGNMENT_TYPE_STYLE['Other'];
+  const override = einkActive && EINK_TYPE_COLOR_OVERRIDE[type];
+  return override ? { ...style, color: override } : style;
 }
 
 function getTodayISO() {
@@ -88,11 +146,11 @@ function getDueInfo(isoDate) {
   const diff = getDaysUntil(isoDate);
   if (diff === null) return null;
   const dateStr = formatDate(isoDate);
-  if (diff < 0)  return { label: `${dateStr} · overdue`, color: '#E24B4A', note: 'Overdue', noteColor: '#A32D2D', urgency: 'overdue' };
-  if (diff === 0) return { label: `${dateStr} · today`,   color: '#E24B4A', note: 'Today',   noteColor: '#A32D2D', urgency: 'today' };
-  if (diff === 1) return { label: `${dateStr} · tomorrow`,color: '#BA7517', note: 'Tomorrow',noteColor: '#854F0B', urgency: 'soon' };
-  if (diff <= 7)  return { label: `${dateStr} · ${diff} days`, color: '#BA7517', note: `${diff} days`, noteColor: '#854F0B', urgency: 'soon' };
-  return { label: dateStr, color: 'var(--text-muted)', note: `${diff} days`, noteColor: 'var(--text-faint)', urgency: 'upcoming' };
+  if (diff < 0)  return { label: `${dateStr} · overdue`, color: einkColor('#E24B4A'), note: 'Overdue', noteColor: '#A32D2D', urgency: 'overdue' };
+  if (diff === 0) return { label: `${dateStr} · today`,   color: einkColor('#E24B4A'), note: 'Today',   noteColor: '#A32D2D', urgency: 'today' };
+  if (diff === 1) return { label: `${dateStr} · tomorrow`,color: einkColor('#BA7517'), note: 'Tomorrow',noteColor: '#854F0B', urgency: 'soon' };
+  if (diff <= 7)  return { label: `${dateStr} · ${diff} days`, color: einkColor('#BA7517'), note: `${diff} days`, noteColor: '#854F0B', urgency: 'soon' };
+  return { label: dateStr, color: einkActive ? EINK_UPCOMING_COLOR : 'var(--text-muted)', note: `${diff} days`, noteColor: 'var(--text-faint)', urgency: 'upcoming' };
 }
 
 function getAllAssignments(semester) {
@@ -108,6 +166,40 @@ function getAllAssignments(semester) {
     }
   }
   return all;
+}
+
+// getAbstractFileByPath only checks Obsidian's in-memory vault index. On
+// mobile that index can lag behind disk after a sync tool (e.g. Syncthing)
+// writes a file — the note is real but not indexed yet, so the lookup
+// fails even though the file exists. openLinkText() resolves through that
+// same stale index internally — calling it anyway risks it creating a new
+// empty note instead of finding the real one (the bug this pattern is
+// already guarding against).
+//
+// adapter.reconcileFile(path, path, false) forces the vault index to pick
+// up a single externally-written file without a full app reload — verified
+// against the obsidian-vault-file-refresh community plugin, which uses the
+// same call for the same problem. It's NOT in Obsidian's public API
+// (obsidian.d.ts has no reindex/reconcile method), so it's wrapped in a
+// try/catch: if a future Obsidian version removes or renames it, this
+// falls through to the full-reload path below instead of throwing.
+async function openVaultNote(app, path) {
+  let file = app.vault.getAbstractFileByPath(path);
+  if (!file && await app.vault.adapter.exists(path)) {
+    try {
+      await app.vault.adapter.reconcileFile(path, path, false);
+      file = app.vault.getAbstractFileByPath(path);
+    } catch (e) {
+      // private API — fall through to the reload path below
+    }
+  }
+  if (file) {
+    app.workspace.openLinkText(path, '', false);
+  } else if (await app.vault.adapter.exists(path)) {
+    new ConfirmReloadModal(app).open();
+  } else {
+    new Notice('Note not found in vault.');
+  }
 }
 
 function getNextAssignmentDue(cls) {
@@ -254,6 +346,12 @@ function getCalItemStyle(item) {
 class HoldCoursePlugin extends Plugin {
   async onload() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
+    this.data.settings = this.data.settings || { einkMode: false, mobileScale: 1.1 };
+    if (this.data.settings.mobileScale === undefined) this.data.settings.mobileScale = 1.1;
+    this.applyEinkClass();
+    this.applyMobileScale();
+
+    this.addSettingTab(new HoldCourseSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new HoldCourseView(leaf, this));
     this.registerView(TODAY_VIEW_TYPE, (leaf) => new HoldCourseTodayView(leaf, this));
@@ -310,7 +408,25 @@ class HoldCoursePlugin extends Plugin {
     });
   }
 
-  onunload() {}
+  onunload() {
+    document.body.classList.remove('hc-eink');
+  }
+
+  applyEinkClass() {
+    einkActive = this.data.settings.einkMode;
+    document.body.classList.toggle('hc-eink', einkActive);
+  }
+
+  applyMobileScale() {
+    document.body.style.setProperty('--hc-mobile-scale', this.data.settings.mobileScale);
+  }
+
+  refreshAllViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof HoldCourseView) leaf.view.refresh();
+    }
+    this.refreshTodayView();
+  }
 
   async activateView() {
     const { workspace } = this.app;
@@ -591,6 +707,53 @@ class HoldCoursePlugin extends Plugin {
   findResource(semesterId, resourceId) {
     const sem = this.data.semesters.find(s => s.id === semesterId);
     return sem ? (sem.resources || []).find(r => r.id === resourceId) : null;
+  }
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+
+class HoldCourseSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl)
+      .setName('E-ink display mode')
+      .setDesc('Increases text contrast and size for e-ink displays (e.g. Boox tablets), where low-contrast text can wash out under fast refresh.')
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.data.settings.einkMode)
+        .onChange(async (value) => {
+          this.plugin.data.settings.einkMode = value;
+          this.plugin.applyEinkClass();
+          this.plugin.refreshAllViews();
+          await this.plugin.save();
+        }));
+
+    const scaleSetting = new Setting(containerEl)
+      .setName('Mobile & tablet size')
+      .setDesc('Scales the mobile/tablet view — text, spacing and icons together — up or down in 10% steps. Desktop is unaffected.');
+
+    const minusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '−' });
+    const label = scaleSetting.controlEl.createSpan({
+      cls: 'hc-settings-scale-label',
+      text: `${Math.round(this.plugin.data.settings.mobileScale * 100)}%`,
+    });
+    const plusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '+' });
+
+    const step = async (delta) => {
+      const next = Math.min(1.5, Math.max(0.9, Math.round((this.plugin.data.settings.mobileScale + delta) * 10) / 10));
+      this.plugin.data.settings.mobileScale = next;
+      this.plugin.applyMobileScale();
+      await this.plugin.save();
+      label.setText(`${Math.round(next * 100)}%`);
+    };
+    minusBtn.addEventListener('click', () => step(-0.1));
+    plusBtn.addEventListener('click', () => step(0.1));
   }
 }
 
@@ -964,7 +1127,7 @@ class HoldCourseView extends ItemView {
 
     // Color bar
     const bar = card.createDiv('hc-class-bar');
-    bar.style.background = color.accent;
+    bar.style.background = color.fill;
 
     // Card body
     const body = card.createDiv('hc-class-body');
@@ -1060,7 +1223,7 @@ class HoldCourseView extends ItemView {
 
     const codeRow = header.createDiv('hc-class-header-code-row');
     const accent = codeRow.createDiv('hc-class-header-accent');
-    accent.style.background = color.accent;
+    accent.style.background = color.fill;
     const codeEl = codeRow.createSpan({ cls: 'hc-class-header-code', text: cls.code });
     codeEl.style.color = color.accent;
 
@@ -1350,11 +1513,7 @@ class HoldCourseView extends ItemView {
 
       if (path) {
         const openBtn = linkRow.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Open note' });
-        openBtn.addEventListener('click', () => {
-          const file = this.app.vault.getAbstractFileByPath(path);
-          if (file) this.app.workspace.openLinkText(path, '', false);
-          else new Notice('Note not found in vault.');
-        });
+        openBtn.addEventListener('click', () => openVaultNote(this.app, path));
 
         const removeBtn = linkRow.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Remove' });
         removeBtn.addEventListener('click', () => {
@@ -1388,7 +1547,7 @@ class HoldCourseView extends ItemView {
           dueEl.createDiv({ cls: 'hc-lecture-assign-due-label', text: 'Due' });
           const dueDate = dueEl.createDiv({ cls: 'hc-lecture-assign-due-date', text: formatDate(a.dueDate) });
           if ((info?.urgency === 'overdue' || info?.urgency === 'today') && a.status !== 'done') {
-            dueDate.style.color = '#E24B4A';
+            dueDate.style.color = einkColor('#E24B4A');
             if (info.urgency === 'overdue') {
               dueEl.createDiv({ cls: 'hc-lecture-assign-overdue', text: 'Overdue' });
             }
@@ -1817,11 +1976,7 @@ class HoldCourseView extends ItemView {
 
         if (path) {
           const openBtn = noteRow.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Open note' });
-          openBtn.addEventListener('click', () => {
-            const file = this.app.vault.getAbstractFileByPath(path);
-            if (file) this.app.workspace.openLinkText(path, '', false);
-            else new Notice('Note not found in vault.');
-          });
+          openBtn.addEventListener('click', () => openVaultNote(this.app, path));
 
           const removeBtn = noteRow.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Remove' });
           removeBtn.addEventListener('click', () => {
@@ -2274,9 +2429,7 @@ class HoldCourseView extends ItemView {
         vaultInfo.createDiv({ cls: 'hc-resource-source-path', text: resource.vaultLink });
         const openIcon = vaultRow.createSpan({ cls: 'hc-resource-source-open' });
         setIcon(openIcon, 'external-link');
-        vaultRow.addEventListener('click', () => {
-          this.app.workspace.openLinkText(resource.vaultLink, '', false);
-        });
+        vaultRow.addEventListener('click', () => openVaultNote(this.app, resource.vaultLink));
       }
 
       if (hasUrl) {
@@ -2688,7 +2841,7 @@ class HoldCourseView extends ItemView {
       const c = getColor(cls.colorIndex);
       const item = classGroup.createDiv('hc-cal-legend-item');
       const dot = item.createDiv('hc-cal-legend-dot');
-      dot.style.background = c.accent;
+      dot.style.background = c.fill;
       item.createSpan({ cls: 'hc-cal-legend-label', text: cls.code });
     }
 
@@ -2756,7 +2909,7 @@ class HoldCourseView extends ItemView {
           pill.style.textDecoration = 'line-through';
         } else {
           pill.style.background = style.bg;
-          pill.style.color = overdue ? '#E24B4A' : style.color;
+          pill.style.color = overdue ? einkColor('#E24B4A') : style.color;
         }
         pill.setText(item.title);
       }
@@ -2809,7 +2962,7 @@ class HoldCourseView extends ItemView {
           pill.style.textDecoration = 'line-through';
         } else {
           pill.style.background = style.bg;
-          pill.style.color = overdue ? '#E24B4A' : style.color;
+          pill.style.color = overdue ? einkColor('#E24B4A') : style.color;
         }
         pill.setText(item.title);
       }
@@ -3356,6 +3509,34 @@ class EditLectureModal extends Modal {
     });
     this.onSave();
     this.close();
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+// Last-resort fallback in openVaultNote() when reconcileFile() didn't work
+// (or isn't available) and the note still isn't indexed. app:reload restarts
+// the whole app — safe for saved notes, but any unsaved edit elsewhere in
+// the vault is lost, so this asks first instead of firing automatically.
+class ConfirmReloadModal extends Modal {
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('hc-modal');
+    contentEl.createEl('h2', { cls: 'hc-modal-title', text: 'Reload Obsidian?' });
+    contentEl.createEl('p', {
+      cls: 'hc-modal-body',
+      text: 'This note exists but Obsidian hasn\'t indexed it yet. Reloading will fix that, but any unsaved changes elsewhere in the vault will be lost. Reload now?',
+    });
+
+    const footer = contentEl.createDiv('hc-modal-footer');
+    const cancelBtn = footer.createEl('button', { cls: 'hc-btn', text: 'Cancel' });
+    cancelBtn.addEventListener('click', () => this.close());
+    const reloadBtn = footer.createEl('button', { cls: 'hc-btn hc-btn--danger', text: 'Reload' });
+    reloadBtn.addEventListener('click', () => {
+      this.close();
+      this.app.commands.executeCommandById('app:reload');
+    });
   }
 
   onClose() { this.contentEl.empty(); }
@@ -4308,3 +4489,10 @@ EditResourceModal.prototype._renderFooter   = _renderFooter;
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 module.exports = HoldCoursePlugin;
+
+// Obsidian only uses the default export; these are attached so pure logic
+// can be unit-tested without starting the app. See test/.
+Object.assign(module.exports, {
+  openVaultNote,
+  ConfirmReloadModal,
+});
