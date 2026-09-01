@@ -38,54 +38,61 @@ const ASSIGNMENT_TYPE_STYLE = {
   'Other':      { color: '#666666', bg: '#F0F0F0' },
 };
 
-// Same hue as their COLOR_PALETTE/ASSIGNMENT_TYPE_STYLE counterpart, only
-// applied when E-ink display mode is on:
-// - COLOR_PALETTE accents: on a color screen the 6 accents are visually
-//   distinct, but several convert to nearly the same gray (e.g. coral/
-//   purple/pink all sit around luminance 0.10), making class color-coding
-//   useless on an e-ink screen. Re-lightened to 6 luminance steps between
-//   0.03-0.15 (the max an accent can be while still clearing 4.5:1 grayscale
-//   contrast against its own badge bg) and assigned zigzag across array
-//   order so any two adjacent classes get maximally separated grays.
-// - ASSIGNMENT_TYPE_STYLE colors: darkened just enough to clear 4.5:1
-//   grayscale text contrast against their badge bg — the other entries
-//   already clear it.
+// #9: true neutral grays (R=G=B), not hue-preserving hex — a hue converts
+// to gray unpredictably depending on the e-ink panel's own color filter, so
+// picking a hex "tuned to a target luminance" was a theoretical calculation
+// never confirmed against real hardware (unlike Horus's grayscale palette,
+// horus/styles.css:487, which uses literal neutral RGB steps and has been
+// device-confirmed on a Boox). These are WCAG-relative-luminance-derived
+// neutral grays at the same target luminance bands the old hex aimed for,
+// evenly spaced and zigzag-assigned across array order so adjacent classes
+// stay maximally separated. Still pending the same device confirmation
+// Horus already did — verify on a Boox before trusting the exact values.
+// - COLOR_PALETTE accents: lum 0.03-0.15 (clears 4.5:1 against their own
+//   light badge bg, same ceiling as before).
 const EINK_ACCENT_OVERRIDE = {
-  amber:  '#452B08',
-  teal:   '#0E6650',
-  coral:  '#712C15',
-  purple: '#5E56BC',
-  pink:   '#882F4C',
-  green:  '#427A13',
+  amber:  '#303030', // lum 0.030
+  teal:   '#5A5A5A', // lum 0.102
+  coral:  '#424242', // lum 0.054
+  purple: '#646464', // lum 0.126
+  pink:   '#4F4F4F', // lum 0.078
+  green:  '#6C6C6C', // lum 0.150
 };
-const EINK_TYPE_COLOR_OVERRIDE = { Writing: '#A95309', Project: '#476B9E', Discussion: '#597600' };
-// Fill-only variant of the accents above (class color bar/dot — no text sits
-// on top), used only when eink is on. Not bound by the 4.5:1 text-on-badge
-// ceiling that keeps EINK_ACCENT_OVERRIDE clustered around lum 0.03-0.15, so
-// these can spread across a much wider band (0.02-0.50) and stay genuinely
-// distinguishable from each other, while still reading against a white page.
+// ASSIGNMENT_TYPE_STYLE colors: same 0.03-0.15 band as the accents above —
+// the other type entries already clear 4.5:1 without an override.
+const EINK_TYPE_COLOR_OVERRIDE = { Writing: '#303030', Project: '#6C6C6C', Discussion: '#555555' };
+// Fill-only variant of the accents above (class color bar/accent-strip/dot —
+// no text sits on top, so not bound by the 4.5:1 badge-text ceiling; these
+// spread across a much wider band). Unlike EINK_ACCENT_OVERRIDE, fill paints
+// directly onto the card/page background (.hc-class-bar etc.), not onto a
+// fixed light badge bg — so an absolute hex here has the exact "assumed
+// white page" problem the due-date colors had (dark grays would nearly
+// vanish on Obsidian's dark theme). color-mix against var(--text-normal),
+// same fix as EINK_URGENT_COLOR/EINK_SOON_COLOR/EINK_UPCOMING_COLOR below:
+// self-contained, and the mix percentage alone still gives 6 distinguishable
+// steps (was: relative luminance 0.02-0.50, now the same spread mapped to a
+// 15%-90% mix band).
 const EINK_FILL_OVERRIDE = {
-  amber:  '#372307',
-  teal:   '#0F6D55',
-  coral:  '#D7562B',
-  purple: '#958FD3',
-  pink:   '#DB97AE',
-  green:  '#72D221',
+  amber:  'color-mix(in srgb, var(--text-normal) 15%, transparent)',
+  teal:   'color-mix(in srgb, var(--text-normal) 60%, transparent)',
+  coral:  'color-mix(in srgb, var(--text-normal) 30%, transparent)',
+  purple: 'color-mix(in srgb, var(--text-normal) 75%, transparent)',
+  pink:   'color-mix(in srgb, var(--text-normal) 45%, transparent)',
+  green:  'color-mix(in srgb, var(--text-normal) 90%, transparent)',
 };
-// getDueInfo()'s "overdue/today" red and "soon" amber sit at grayscale
-// contrast ~1.06:1 — indistinguishable on an e-ink screen. Darkened apart.
-const EINK_DUE_COLOR_OVERRIDE = { '#E24B4A': '#6A1211', '#BA7517': '#935D12' };
-// "upcoming" (>7 days out) normally uses var(--text-muted), which the eink
-// CSS (see styles.css body.hc-eink) already darkens close to --text-normal
-// for general readability — that would collapse it toward the same near-
-// black as the overdue override above, losing the 3-step urgency ladder.
-// Fixed mid-gray instead, distinct from both overdue and soon.
-const EINK_UPCOMING_COLOR = '#959595';
 let einkActive = false;
 
-function einkColor(hex) {
-  return (einkActive && EINK_DUE_COLOR_OVERRIDE[hex]) || hex;
-}
+// #9: getDueInfo()'s urgency colors used to be absolute hex darkened "while
+// still reading against a white page" — broke under Obsidian's dark theme
+// (dark red-on-dark background, reported 2026-09-01) because they assumed a
+// specific background instead of deriving from the theme, the same mistake
+// Horus's grayscale never makes. color-mix against var(--text-normal) is
+// self-contained instead: it inherits whatever the current theme's own
+// foreground color is, in both eink and non-eink modes, and still gives a
+// 3-step urgency ladder via the mix percentage alone.
+const EINK_URGENT_COLOR = 'var(--text-normal)';
+const EINK_SOON_COLOR = 'color-mix(in srgb, var(--text-normal) 75%, transparent)';
+const EINK_UPCOMING_COLOR = 'color-mix(in srgb, var(--text-normal) 50%, transparent)';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -147,10 +154,10 @@ function getDueInfo(isoDate) {
   const diff = getDaysUntil(isoDate);
   if (diff === null) return null;
   const dateStr = formatDate(isoDate);
-  if (diff < 0)  return { label: `${dateStr} · overdue`, color: einkColor('#E24B4A'), note: 'Overdue', noteColor: '#A32D2D', urgency: 'overdue' };
-  if (diff === 0) return { label: `${dateStr} · today`,   color: einkColor('#E24B4A'), note: 'Today',   noteColor: '#A32D2D', urgency: 'today' };
-  if (diff === 1) return { label: `${dateStr} · tomorrow`,color: einkColor('#BA7517'), note: 'Tomorrow',noteColor: '#854F0B', urgency: 'soon' };
-  if (diff <= 7)  return { label: `${dateStr} · ${diff} days`, color: einkColor('#BA7517'), note: `${diff} days`, noteColor: '#854F0B', urgency: 'soon' };
+  if (diff < 0)  return { label: `${dateStr} · overdue`, color: einkActive ? EINK_URGENT_COLOR : '#E24B4A', note: 'Overdue', noteColor: '#A32D2D', urgency: 'overdue' };
+  if (diff === 0) return { label: `${dateStr} · today`,   color: einkActive ? EINK_URGENT_COLOR : '#E24B4A', note: 'Today',   noteColor: '#A32D2D', urgency: 'today' };
+  if (diff === 1) return { label: `${dateStr} · tomorrow`,color: einkActive ? EINK_SOON_COLOR : '#BA7517', note: 'Tomorrow',noteColor: '#854F0B', urgency: 'soon' };
+  if (diff <= 7)  return { label: `${dateStr} · ${diff} days`, color: einkActive ? EINK_SOON_COLOR : '#BA7517', note: `${diff} days`, noteColor: '#854F0B', urgency: 'soon' };
   return { label: dateStr, color: einkActive ? EINK_UPCOMING_COLOR : 'var(--text-muted)', note: `${diff} days`, noteColor: 'var(--text-faint)', urgency: 'upcoming' };
 }
 
@@ -725,8 +732,8 @@ class HoldCourseSettingTab extends PluginSettingTab {
     containerEl.empty();
 
     new Setting(containerEl)
-      .setName('E-ink display mode')
-      .setDesc('Increases text contrast and size for e-ink displays (e.g. Boox tablets), where low-contrast text can wash out under fast refresh.')
+      .setName('E-ink / grayscale display mode')
+      .setDesc('Increases text contrast and size, and swaps class/type colors for a true grayscale palette. For e-ink displays (e.g. Boox tablets), where low-contrast text can wash out under fast refresh — also useful if you run your phone or tablet in grayscale for fewer distractions.')
       .addToggle((toggle) => toggle
         .setValue(this.plugin.data.settings.einkMode)
         .onChange(async (value) => {
@@ -1549,7 +1556,7 @@ class HoldCourseView extends ItemView {
           dueEl.createDiv({ cls: 'hc-lecture-assign-due-label', text: 'Due' });
           const dueDate = dueEl.createDiv({ cls: 'hc-lecture-assign-due-date', text: formatDate(a.dueDate) });
           if ((info?.urgency === 'overdue' || info?.urgency === 'today') && a.status !== 'done') {
-            dueDate.style.color = einkColor('#E24B4A');
+            dueDate.style.color = (einkActive ? EINK_URGENT_COLOR : '#E24B4A');
             if (info.urgency === 'overdue') {
               dueEl.createDiv({ cls: 'hc-lecture-assign-overdue', text: 'Overdue' });
             }
@@ -2927,7 +2934,7 @@ class HoldCourseView extends ItemView {
           pill.style.textDecoration = 'line-through';
         } else {
           pill.style.background = style.bg;
-          pill.style.color = overdue ? einkColor('#E24B4A') : style.color;
+          pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
         }
         pill.setText(item.title);
       }
@@ -2980,7 +2987,7 @@ class HoldCourseView extends ItemView {
           pill.style.textDecoration = 'line-through';
         } else {
           pill.style.background = style.bg;
-          pill.style.color = overdue ? einkColor('#E24B4A') : style.color;
+          pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
         }
         pill.setText(item.title);
       }
