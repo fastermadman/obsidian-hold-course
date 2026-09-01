@@ -2163,3 +2163,23 @@
   padding: 16px;
   text-align: center;
 }
+
+/* --- Mobile layout ----------------------------------------------------------
+   Obsidian sets body.is-mobile on phone/tablet; scoped there so desktop is
+   untouched, per #4. Flat size bump for readability + single-column reflow
+   for the two 2-col grids below phone width, where two columns leaves ~150px
+   per card/column and cramps class names and today-strip rows. The 7-col
+   calendar grid isn't reflowed — collapsing a calendar's day columns would
+   defeat the point of a calendar; it already shrinks via its own min-width:0
+   cells. */
+.is-mobile .hc-root,
+.is-mobile .hc-today-root {
+  font-size: 1.1em;
+}
+
+@media (max-width: 480px) {
+  .is-mobile .hc-class-grid,
+  .is-mobile .hc-today-strip {
+    grid-template-columns: 1fr;
+  }
+}
