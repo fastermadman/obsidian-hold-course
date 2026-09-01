@@ -109,6 +109,10 @@
   padding: 20px 20px 48px;
   flex: 1;
   overflow-y: auto;
+  /* Lets the grids below reflow on the PANE's actual width via @container,
+     not the whole Obsidian window's — a viewport media query can't see a
+     leaf getting squeezed by a sidebar, only the outer window shrinking. */
+  container-type: inline-size;
 }
 
 /* --- Dashboard header ------------------------------------------------------ */
@@ -1393,6 +1397,22 @@
   gap: 4px;
 }
 
+/* Skips the resource-detail detour straight to the linked vault file — always
+   visible (not hover-only) so it works on touch, see #6. */
+.hc-resource-open-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+}
+
+.hc-resource-open-btn:hover { background: var(--background-secondary); color: var(--text-normal); }
+.hc-resource-open-btn svg { width: 14px; height: 14px; }
+
 .hc-resource-class-chip {
   font-size: 11px;
   font-weight: 500;
@@ -2182,11 +2202,14 @@ body.hc-eink .hc-root,
 body.hc-eink .hc-today-root {
   /* ponytail: flat 5% bump, not calibrated per device */
   font-size: 1.05em;
-  /* e-ink displays wash out low-contrast text under fast refresh; bump the
-     baseline so status/date/count text stays readable. True decorative
-     elements (icons, separators, placeholders) are restored below. */
-  --text-muted: var(--text-normal);
-  --text-faint: var(--text-normal);
+  /* e-ink displays wash out low-contrast text under fast refresh; raise the
+     baseline so status/date/count text stays readable. Blended toward full
+     contrast rather than fully replaced (that read as too flat/harsh on
+     device) — still keeps a hint of the normal/muted/faint hierarchy. True
+     decorative elements (icons, separators, placeholders) are restored
+     below. */
+  --text-muted: color-mix(in srgb, var(--text-normal) 70%, var(--hc-dim-muted));
+  --text-faint: color-mix(in srgb, var(--text-normal) 70%, var(--hc-dim-faint));
 }
 
 /* .hc-today-item-meta (class code + lecture/assignment type — load-bearing,
@@ -2238,9 +2261,14 @@ body.hc-eink .hc-resource-source-icon {
   zoom: var(--hc-mobile-scale, 1.1);
 }
 
-@media (max-width: 480px) {
-  .is-mobile .hc-class-grid,
-  .is-mobile .hc-today-strip {
+/* Container query, not a viewport media query: reflow depends on the
+   HoldCourse pane's own width, which can go narrow on any platform — a
+   phone screen, or a desktop leaf squeezed between sidebars (#10, found
+   when HoldCourse's own auto-opened Today view narrowed the main pane).
+   Not gated to .is-mobile: narrowness is narrowness, regardless of device. */
+@container (max-width: 480px) {
+  .hc-class-grid,
+  .hc-today-strip {
     grid-template-columns: 1fr;
   }
 }

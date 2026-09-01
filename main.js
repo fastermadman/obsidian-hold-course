@@ -1904,6 +1904,13 @@ class HoldCourseView extends ItemView {
           bookLink.addEventListener('click', () => this.navigate('resource', cls.id, null, null, null, res.id));
 
           const bookActions = bookRow.createDiv('hc-assign-book-actions');
+          if (res.vaultLink) {
+            const openBtn = bookActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+            setIcon(openBtn, 'external-link');
+            openBtn.addEventListener('click', () => {
+              this.app.workspace.openLinkText(res.vaultLink, '', false);
+            });
+          }
           const changeBtn = bookActions.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Change' });
           changeBtn.addEventListener('click', () => {
             new ResourcePickSuggestModal(this.app, classResources, (resource) => {
@@ -2309,6 +2316,15 @@ class HoldCourseView extends ItemView {
     }
 
     const right = row.createDiv('hc-resource-right');
+
+    if (resource.vaultLink) {
+      const openBtn = right.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        this.app.workspace.openLinkText(resource.vaultLink, '', false);
+      });
+    }
 
     if (resource.classIds && resource.classIds.length > 0) {
       const chipsEl = right.createDiv('hc-resource-class-chips');
