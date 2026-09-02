@@ -2356,6 +2356,12 @@ class HoldCourseView extends ItemView {
     // detail), not lec.notes (the Key Concepts textarea).
     if ((lec.vaultLink || '').trim()) {
       right.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
+      const openBtn = right.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openVaultNote(this.app, lec.vaultLink);
+      });
     }
 
     // #9: broken out by Reading vs. everything else — "2 assignments" was
@@ -2770,6 +2776,14 @@ class HoldCourseView extends ItemView {
     if (assignment.status === 'done' && (assignment.grade || '').trim()) {
       mid.createSpan({ cls: 'hc-grade-chip', text: assignment.grade.trim() });
     }
+    if ((assignment.linkedNote || '').trim()) {
+      const openBtn = mid.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openVaultNote(this.app, assignment.linkedNote);
+      });
+    }
 
     // Right: status (matches the lecture/exam position), then due date
     const right = row.createDiv('hc-assign-due');
@@ -2907,6 +2921,12 @@ class HoldCourseView extends ItemView {
     // note, a quiet label when there is. #9 (LiveAQuietLife, 2026-09-01)
     if ((assignment.linkedNote || '').trim()) {
       mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
+      const openBtn = mid.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openVaultNote(this.app, assignment.linkedNote);
+      });
     }
 
     // Right: status + due date — identical pattern to the Assignments row,
@@ -3130,9 +3150,7 @@ class HoldCourseView extends ItemView {
           if (res.vaultLink) {
             const openBtn = bookActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
             setIcon(openBtn, 'external-link');
-            openBtn.addEventListener('click', () => {
-              this.app.workspace.openLinkText(res.vaultLink, '', false);
-            });
+            openBtn.addEventListener('click', () => openVaultNote(this.app, res.vaultLink));
           }
           const changeBtn = bookActions.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Change' });
           changeBtn.addEventListener('click', () => {
@@ -3571,7 +3589,7 @@ class HoldCourseView extends ItemView {
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
-        this.app.workspace.openLinkText(resource.vaultLink, '', false);
+        openVaultNote(this.app, resource.vaultLink);
       });
     }
 
