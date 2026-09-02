@@ -493,6 +493,51 @@ function getExamsSorted(cls) {
   });
 }
 
+// Pulled out of _renderAssignmentsView so the global Assignments list's own
+// filter/sort/show-done logic is a pure function, callable from both the
+// screen itself and #14's prev/next (which needs the *same* filtered,
+// sorted set the user is actually looking at, not the unfiltered one).
+function getGlobalAssignments(sem, { classId = null, type = null, showDone = false, sort = 'due' } = {}) {
+  let items = getAllAssignments(sem);
+
+  if (classId)        items = items.filter(a => a.classId === classId);
+  if (type)            items = items.filter(a => a.type === type);
+  if (!showDone)        items = items.filter(a => a.status !== 'done');
+
+  const STATUS_ORDER = { 'overdue': 0, 'today': 1, 'soon': 2, 'upcoming': 3, 'done': 4, 'none': 5 };
+  const getUrgency = (a) => a.dueDate ? (getDueInfo(a.dueDate)?.urgency || 'upcoming') : 'none';
+
+  if (sort === 'due') {
+    items.sort((a, b) => {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  } else if (sort === 'class') {
+    items.sort((a, b) => {
+      const ca = a.classCode || '', cb = b.classCode || '';
+      if (ca !== cb) return ca.localeCompare(cb);
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  } else if (sort === 'status') {
+    items.sort((a, b) => {
+      const ua = STATUS_ORDER[getUrgency(a)] ?? 5;
+      const ub = STATUS_ORDER[getUrgency(b)] ?? 5;
+      if (ua !== ub) return ua - ub;
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  }
+
+  return items;
+}
+
 function classStatusLabel(status) {
   if (!status) return '—';
   return status.charAt(0).toUpperCase() + status.slice(1);
@@ -3928,48 +3973,12 @@ class HoldCourseView extends ItemView {
     });
 
     // ── Gather + filter + sort ────────────────────────────────────────────────
-    let allAssigns = getAllAssignments(sem);
-
-    if (this.globalAssignFilterClassId) {
-      allAssigns = allAssigns.filter(a => a.classId === this.globalAssignFilterClassId);
-    }
-    if (this.globalAssignFilterType) {
-      allAssigns = allAssigns.filter(a => a.type === this.globalAssignFilterType);
-    }
-    if (!showDone) {
-      allAssigns = allAssigns.filter(a => a.status !== 'done');
-    }
-
-    const STATUS_ORDER = { 'overdue': 0, 'today': 1, 'soon': 2, 'upcoming': 3, 'done': 4, 'none': 5 };
-    const getUrgency = (a) => a.dueDate ? (getDueInfo(a.dueDate)?.urgency || 'upcoming') : 'none';
-
-    if (sem.assignSort === 'due') {
-      allAssigns.sort((a, b) => {
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      });
-    } else if (sem.assignSort === 'class') {
-      allAssigns.sort((a, b) => {
-        const ca = a.classCode || '', cb = b.classCode || '';
-        if (ca !== cb) return ca.localeCompare(cb);
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      });
-    } else if (sem.assignSort === 'status') {
-      allAssigns.sort((a, b) => {
-        const ua = STATUS_ORDER[getUrgency(a)] ?? 5;
-        const ub = STATUS_ORDER[getUrgency(b)] ?? 5;
-        if (ua !== ub) return ua - ub;
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      });
-    }
+    const allAssigns = getGlobalAssignments(sem, {
+      classId: this.globalAssignFilterClassId,
+      type: this.globalAssignFilterType,
+      showDone,
+      sort: sem.assignSort,
+    });
 
     // ── List ──────────────────────────────────────────────────────────────────
     const list = content.createDiv('hc-assign-list');
@@ -7106,6 +7115,7 @@ module.exports = HoldCoursePlugin;
 Object.assign(module.exports, {
   openVaultNote,
   ConfirmReloadModal,
+  getGlobalAssignments,
 });
 
 /* nosourcemap */
