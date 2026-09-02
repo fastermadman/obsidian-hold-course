@@ -2371,10 +2371,11 @@ class HoldCourseView extends ItemView {
       const shown = overdue.slice(0, 5);
       for (const a of shown) {
         const info = getDueInfo(a.dueDate);
-        const row = overdueCol.createDiv('hc-today-row');
+        const row = overdueCol.createDiv('hc-today-row hc-today-row--clickable');
         const dot = row.createDiv('hc-today-dot');
         dot.style.background = info ? info.color : '#999';
         row.createSpan({ text: `${a.title} · ${formatDate(a.dueDate)}` });
+        row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
       }
       if (overdue.length > shown.length) {
         const moreRow = overdueCol.createDiv('hc-today-row hc-today-empty');
@@ -2388,10 +2389,11 @@ class HoldCourseView extends ItemView {
     if (dueToday.length) {
       for (const a of dueToday) {
         const info = getDueInfo(a.dueDate);
-        const row = leftCol.createDiv('hc-today-row');
+        const row = leftCol.createDiv('hc-today-row hc-today-row--clickable');
         const dot = row.createDiv('hc-today-dot');
         dot.style.background = info ? info.color : '#999';
         row.createSpan({ text: a.title });
+        row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
       }
     } else {
       const emptyRow = leftCol.createDiv('hc-today-row hc-today-empty');
@@ -2404,10 +2406,11 @@ class HoldCourseView extends ItemView {
     if (comingUp.length) {
       for (const a of comingUp) {
         const info = getDueInfo(a.dueDate);
-        const row = rightCol.createDiv('hc-today-row');
+        const row = rightCol.createDiv('hc-today-row hc-today-row--clickable');
         const dot = row.createDiv('hc-today-dot');
         dot.style.background = info ? info.color : '#999';
         row.createSpan({ text: `${a.title} · ${formatDate(a.dueDate)}` });
+        row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
       }
     } else {
       const emptyRow = rightCol.createDiv('hc-today-row hc-today-empty');
