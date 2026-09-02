@@ -292,7 +292,7 @@ Each item shows its title and a subtitle line with the class name and item type.
 
 **Opening:** The sidebar opens automatically when the plugin loads. Use the command palette to reopen the sidebar if necessary. 
 
-**Navigating:** Click any item to open the main Hold Course tab and navigate directly to that item's detail screen.
+**Navigating:** Click any item to open the main Hold Course tab and navigate directly to that item's detail screen. Its back button reads "Today", so you can return to the sidebar's context even though it lives in a different pane.
 
 **Auto-refresh:** The sidebar updates automatically whenever you make a change in Hold Course, and again on its own if the date rolls over while Obsidian is left open — so Today and Tomorrow stay accurate even overnight. You don't need to refresh it manually.
 
@@ -307,6 +307,7 @@ Hold Course registers several commands in Obsidian's command palette (Ctrl/Cmd+P
 - Add a class — opens the Add Class dialog for the active semester
 - Open calendar — opens the main tab and navigates directly to Calendar view
 - Show global assignments — opens the main tab and navigates to the Assignments view
+- Back / Forward — steps through your actual navigation history on the main tab, separate from each detail screen's own back-to-list button (no default hotkey — bind one in Settings > Hotkeys if you want it)
 - Add a library resource — opens the Add Resource dialog for the active semester
 - Add a lecture — opens the Add Lecture dialog for the current class (requires an open class screen)
 - Add an assignment — opens the Add Assignment dialog for the current class (requires an open class screen)
