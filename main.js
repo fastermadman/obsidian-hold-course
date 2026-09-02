@@ -1900,11 +1900,10 @@ class HoldCourseView extends ItemView {
     const sem = this._getViewedSemester();
     if (!sem || ['dashboard', 'assignments', 'calendar', 'courses'].includes(this.screen)) return;
 
-    // The root names the route you actually took. viewedSemesterId is set only by
-    // a click through from Courses, so its presence *is* "you came from Courses" —
-    // read as state, not history, which is why it survives drilling down and does
-    // not need a second field to track it.
-    const fromCourses = !!this.viewedSemesterId;
+    // The root names the route you actually took, for the whole class
+    // subtree — see enteredViaCourses in the constructor for why this reads
+    // its own field rather than any other navigation-state proxy.
+    const fromCourses = this.enteredViaCourses;
     const rootLabel = fromCourses ? 'Courses' : 'Overview';
     const ovBtn = bc.createEl('button', { cls: 'hc-bc-link', text: rootLabel });
     ovBtn.addEventListener('click', () => this.navigate(fromCourses ? 'courses' : 'dashboard'));
