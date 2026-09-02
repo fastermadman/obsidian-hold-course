@@ -1059,7 +1059,10 @@
 
 /* --- Lecture detail -------------------------------------------------------- */
 
-.hc-lecture-back-btn {
+/* Renamed from .hc-lecture-back-btn (#14) — this button is no longer
+   lecture-specific, it's the one back-to-the-working-set button every
+   detail screen shares via _renderSubheader. */
+.hc-nav-back-btn {
   margin-bottom: 0;
 }
 
