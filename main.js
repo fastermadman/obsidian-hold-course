@@ -3474,9 +3474,15 @@ class HoldCourseView extends ItemView {
     moveBtn.addEventListener('click', () => {
       new MoveAssignmentModal(this.app, this.plugin, sem.id, cls, assignment, lectureId, () => {
         this.plugin.save();
-        // #9: land on Readings after moving a Reading item. (LiveAQuietLife, 2026-09-01)
-        this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from, same as the
+        // back button — falls back to the class (Readings for a Reading
+        // item, #9) only when there's no origin to return to.
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -3487,9 +3493,15 @@ class HoldCourseView extends ItemView {
     deleteBtn.addEventListener('click', () => {
       new DeleteAssignmentModal(this.app, this.plugin, sem.id, cls.id, assignment, () => {
         this.plugin.save();
-        // #9: land on Readings after deleting a Reading item. (LiveAQuietLife, 2026-09-01)
-        this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from, same as the
+        // back button — falls back to the class (Readings for a Reading
+        // item, #9) only when there's no origin to return to.
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -3800,8 +3812,14 @@ class HoldCourseView extends ItemView {
     deleteBtn.addEventListener('click', () => {
       new DeleteExamModal(this.app, this.plugin, sem.id, cls.id, exam, () => {
         this.plugin.save();
-        this.currentTab = 'Exams';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from (falls back
+        // to the class's Exams tab when there's no origin to return to).
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = 'Exams';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -4027,8 +4045,14 @@ class HoldCourseView extends ItemView {
     deleteBtn.addEventListener('click', () => {
       new DeleteResourceModal(this.app, this.plugin, sem.id, resource, () => {
         this.plugin.save();
-        this.currentTab = 'Library';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from (falls back
+        // to the class's Library tab when there's no origin to return to).
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = 'Library';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
