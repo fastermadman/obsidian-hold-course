@@ -1547,17 +1547,22 @@ class HoldCourseView extends ItemView {
     this.contentEl.empty();
     const root = this.contentEl.createDiv('hc-root');
 
-    this._renderToolbar(root);
+    // Toolbar + subheader share one sticky wrapper (`hc-header`) so their
+    // combined height can vary — e.g. with the mobile-scale zoom setting —
+    // without a hardcoded `top` offset on the subheader drifting out of sync.
+    const header = root.createDiv('hc-header');
+    this._renderToolbar(header);
+    const subheader = header.createDiv('hc-subheader');
 
     const content = root.createDiv('hc-content');
 
     switch (this.screen) {
       case 'dashboard':    this._renderDashboard(content); break;
       case 'class':        this._renderClassView(content); break;
-      case 'lecture':      this._renderLectureDetail(content); break;
-      case 'assignment':   this._renderAssignmentDetail(content); break;
-      case 'exam':         this._renderExamDetail(content); break;
-      case 'resource':     this._renderResourceDetail(content); break;
+      case 'lecture':      this._renderLectureDetail(content, subheader); break;
+      case 'assignment':   this._renderAssignmentDetail(content, subheader); break;
+      case 'exam':         this._renderExamDetail(content, subheader); break;
+      case 'resource':     this._renderResourceDetail(content, subheader); break;
       case 'assignments':  this._renderAssignmentsView(content); break;
       case 'calendar':     this._renderCalendarView(content); break;
       case 'courses':      this._renderCoursesView(content); break;
@@ -2396,7 +2401,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Lecture detail ───────────────────────────────────────────────────────
 
-  _renderLectureDetail(content) {
+  _renderLectureDetail(content, subheader) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -2408,15 +2413,10 @@ class HoldCourseView extends ItemView {
     const sorted = getLecturesSorted(cls);
     const num = sorted.indexOf(lec) + 1;
 
-    // Top bar: back button + prev/next nav
-    const topbar = content.createDiv('hc-detail-topbar');
-    const backBtn = topbar.createEl('button', { cls: 'hc-btn hc-lecture-back-btn' });
-    const backIcon = backBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(backIcon, 'arrow-left');
-    backBtn.createSpan({ text: cls.code });
-    backBtn.addEventListener('click', () => this.navigate('class', cls.id));
-
-    const navEl = topbar.createDiv('hc-detail-nav');
+    // Back button dropped: the breadcrumb's class-code link (_renderBreadcrumb)
+    // already navigates back to the class, and it's sticky in the toolbar.
+    // Prev/next nav lives in the sticky subheader instead of scrolling away.
+    const navEl = subheader.createDiv('hc-detail-nav');
     const idx = sorted.indexOf(lec);
     const prevLec = sorted[idx - 1] || null;
     const nextLec = sorted[idx + 1] || null;
@@ -2964,7 +2964,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Assignment detail ────────────────────────────────────────────────────
 
-  _renderAssignmentDetail(content) {
+  _renderAssignmentDetail(content, subheader) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -2976,14 +2976,18 @@ class HoldCourseView extends ItemView {
     const color = getColor(cls.colorIndex);
     const typeStyle = getTypeStyle(assignment.type);
 
-    // Top bar: back button + prev/next nav
+    // Sticky subheader: back button + prev/next nav.
+    // Unlike lecture/exam/resource, this back button is NOT redundant with the
+    // breadcrumb's class-code link — it's contextual (All Assignments, the
+    // originating lecture, or the class), based on where you drilled in from,
+    // while the breadcrumb always goes to the class. Kept, and moved here so
+    // it stays visible on scroll like the rest of this fix.
     const assignSorted = getAssignmentsSorted(cls);
     const assignIdx = assignSorted.findIndex(item => item.assignment.id === assignment.id);
     const prevAssign = assignIdx > 0 ? assignSorted[assignIdx - 1] : null;
     const nextAssign = assignIdx < assignSorted.length - 1 ? assignSorted[assignIdx + 1] : null;
 
-    const topbar = content.createDiv('hc-detail-topbar');
-    const backBtn = topbar.createEl('button', { cls: 'hc-btn hc-lecture-back-btn' });
+    const backBtn = subheader.createEl('button', { cls: 'hc-btn hc-lecture-back-btn' });
     const backIcon = backBtn.createSpan({ cls: 'hc-btn-icon' });
     setIcon(backIcon, 'arrow-left');
     const fromGlobal = this.previousScreen === 'assignments';
@@ -3007,7 +3011,7 @@ class HoldCourseView extends ItemView {
       }
     });
 
-    const assignNavEl = topbar.createDiv('hc-detail-nav');
+    const assignNavEl = subheader.createDiv('hc-detail-nav');
     const prevAssignBtn = assignNavEl.createEl('button', { cls: 'hc-detail-nav-btn' });
     setIcon(prevAssignBtn, 'chevron-left');
     prevAssignBtn.disabled = !prevAssign;
@@ -3357,7 +3361,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Exam detail ──────────────────────────────────────────────────────────
 
-  _renderExamDetail(content) {
+  _renderExamDetail(content, subheader) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -3367,23 +3371,14 @@ class HoldCourseView extends ItemView {
 
     const color = getColor(cls.colorIndex);
 
-    // Top bar: back button + prev/next nav
+    // Back button dropped: the breadcrumb's class-code link already navigates
+    // back to the class (and sets the Exams tab there), and it's sticky.
     const examSorted = getExamsSorted(cls);
     const examIdx = examSorted.findIndex(e => e.id === exam.id);
     const prevExam = examIdx > 0 ? examSorted[examIdx - 1] : null;
     const nextExam = examIdx < examSorted.length - 1 ? examSorted[examIdx + 1] : null;
 
-    const topbar = content.createDiv('hc-detail-topbar');
-    const backBtn = topbar.createEl('button', { cls: 'hc-btn hc-lecture-back-btn' });
-    const backIcon = backBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(backIcon, 'arrow-left');
-    backBtn.createSpan({ text: cls.code });
-    backBtn.addEventListener('click', () => {
-      this.currentTab = 'Exams';
-      this.navigate('class', cls.id);
-    });
-
-    const examNavEl = topbar.createDiv('hc-detail-nav');
+    const examNavEl = subheader.createDiv('hc-detail-nav');
     const prevExamBtn = examNavEl.createEl('button', { cls: 'hc-detail-nav-btn' });
     setIcon(prevExamBtn, 'chevron-left');
     prevExamBtn.disabled = !prevExam;
@@ -3613,7 +3608,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Resource detail ──────────────────────────────────────────────────────
 
-  _renderResourceDetail(content) {
+  _renderResourceDetail(content, subheader) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -3623,15 +3618,9 @@ class HoldCourseView extends ItemView {
 
     const color = getColor(cls.colorIndex);
 
-    // Back button
-    const backBtn = content.createEl('button', { cls: 'hc-btn hc-lecture-back-btn' });
-    const backIcon = backBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(backIcon, 'arrow-left');
-    backBtn.createSpan({ text: cls.code });
-    backBtn.addEventListener('click', () => {
-      this.currentTab = 'Library';
-      this.navigate('class', cls.id);
-    });
+    // Back button dropped: the breadcrumb's class-code link already navigates
+    // back to the class (and sets the Library tab there), and it's sticky.
+    // No prev/next pagination on this screen, so the subheader stays empty.
 
     // Title
     content.createDiv({ cls: 'hc-lecture-detail-title', text: resource.title });

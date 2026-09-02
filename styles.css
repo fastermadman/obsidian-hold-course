@@ -10,16 +10,37 @@
 
 /* --- Toolbar --------------------------------------------------------------- */
 
+/* Toolbar + subheader share one sticky wrapper (.hc-header) instead of each
+   being sticky separately — their combined height varies with the mobile-
+   scale zoom setting, so a hardcoded `top` offset on the subheader would
+   drift out of alignment whenever that setting changes. */
+.hc-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--background-primary);
+}
+
 .hc-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--background-modifier-border);
-  position: sticky;
-  top: 0;
   background: var(--background-primary);
-  z-index: 10;
+}
+
+.hc-subheader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.hc-subheader:empty {
+  display: none;
 }
 
 .hc-logo {
@@ -1038,21 +1059,19 @@
 
 /* --- Lecture detail -------------------------------------------------------- */
 
-.hc-detail-topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
-}
-
 .hc-lecture-back-btn {
   margin-bottom: 0;
 }
 
+/* Pushed to the right of .hc-subheader regardless of whether a back button
+   (assignment detail) sits to its left — pagination is a sequence action,
+   kept on the right to match the toolbar's own hierarchy-left/actions-right
+   split. */
 .hc-detail-nav {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: auto;
 }
 
 .hc-detail-nav-pos {
