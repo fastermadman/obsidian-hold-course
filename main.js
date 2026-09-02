@@ -7422,6 +7422,17 @@ class HoldCourseTodayView extends ItemView {
     if (item.kind === 'lecture')    view.navigate('lecture',    item.cls.id, item.lec.id);
     if (item.kind === 'assignment') view.navigate('assignment', item.cls.id, item.lectureId, item.assignment.id);
     if (item.kind === 'exam')       view.navigate('exam',       item.cls.id, null, null, item.exam.id);
+
+    // navigate()'s own origin rule just snapshotted whatever the main view
+    // happened to be showing before this call — meaningless here, since
+    // that's a different leaf the user wasn't looking at. Override with an
+    // explicit "Today" origin instead (#14), and patch the history entry
+    // navigate() already pushed to match, so back() reflects it too.
+    view.origin = { screen: 'today' };
+    if (view.histIndex >= 0 && view.history[view.histIndex]) {
+      view.history[view.histIndex].origin = view.origin;
+    }
+    view.render();
   }
 }
 
