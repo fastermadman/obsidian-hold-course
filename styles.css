@@ -275,6 +275,18 @@
 
 .hc-today-row:last-child { border: none; }
 
+.hc-today-row--clickable {
+  cursor: pointer;
+  border-radius: 4px;
+  margin: 0 -6px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.hc-today-row--clickable:hover {
+  background: var(--background-secondary);
+}
+
 .hc-today-row span {
   overflow: hidden;
   text-overflow: ellipsis;
