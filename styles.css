@@ -2656,23 +2656,26 @@ body.hc-eink .hc-resource-source-icon {
   text-align: center;
 }
 
-/* --- Mobile layout ----------------------------------------------------------
-   Obsidian sets body.is-mobile on phone/tablet; scoped there so desktop is
-   untouched, per #4. User-adjustable scale (settings +/- stepper sets
-   --hc-mobile-scale, default 1.1) instead of a fixed guess — a flat 10% bump
-   turned out too subtle to judge on-device either way, so make it tunable.
+/* --- View scale & responsive layout ------------------------------------------
+   Originally .is-mobile-only (per #4); made global after noticing there's no
+   real reason a user-adjustable scale should be mobile-exclusive — the value
+   itself is already per-device (data.json isn't shared between .obsidian and
+   .obsidian-onyx, see #10), so a global rule doesn't leak a mobile-tuned
+   value onto desktop or vice versa. Default is still platform-aware (1.1 on
+   mobile, 1.0 on desktop, see Platform.isMobile in onload) so nobody's
+   desktop silently changes size on upgrade — only the CSS gate was removed,
+   not the sensible default.
    `zoom` (not font-size) scales text, spacing and icons together, not just
-   text — Chromium-only, which covers desktop Obsidian (Electron) and Android
-   (this plugin's actual mobile target); no effect under Safari/iOS WebKit,
-   a known gap, not silently broken.
+   text — Chromium-only, which covers desktop Obsidian (Electron) and Android;
+   no effect under Safari/iOS WebKit, a known gap, not silently broken.
    Single-column reflow for the two 2-col grids below phone width, where two
    columns leaves ~150px per card/column and cramps class names and
    today-strip rows. The 7-col calendar grid isn't reflowed — collapsing a
    calendar's day columns would defeat the point of a calendar; it already
    shrinks via its own min-width:0 cells. */
-.is-mobile .hc-root,
-.is-mobile .hc-today-root {
-  zoom: var(--hc-mobile-scale, 1.1);
+.hc-root,
+.hc-today-root {
+  zoom: var(--hc-mobile-scale, 1);
 }
 
 /* Container query, not a viewport media query: reflow depends on the
