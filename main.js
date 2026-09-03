@@ -114,15 +114,12 @@ const EINK_UPCOMING_COLOR = 'color-mix(in srgb, var(--text-normal) 50%, transpar
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-// Calendar "Show" filter entries.
-const CAL_KIND_OPTIONS = [
-  { value: null,         label: 'All' },
-  { value: 'lecture',    label: 'Lectures' },
-  { value: 'assignment', label: 'Assignments' },
-  { value: 'exam',       label: 'Exams' },
-];
-
 const ASSIGNMENT_TYPES = ['Reading', 'Writing', 'Project', 'Discussion', 'Other'];
+
+// Same list the calendar legend displays and its type filter toggles act on.
+// 'Exam' isn't an assignment type, but the legend groups it with them visually
+// (they share the "due date, not a class meeting" shape), so it lives here too.
+const CAL_LEGEND_TYPES = ['Reading', 'Writing', 'Discussion', 'Project', 'Exam', 'Other'];
 
 const TERMS = ['Winter', 'Spring', 'Summer', 'Fall'];
 
@@ -986,6 +983,18 @@ function getCalItemStyle(item) {
   if (item.kind === 'exam')       return getTypeStyle('Exam');
   if (item.kind === 'assignment') return getTypeStyle(item.assignment.type);
   return { color: '#666', bg: '#F0F0F0' };
+}
+
+// Calendar legend-as-filter predicate (#21) — module-level and pure so it can
+// be unit-tested without DOM (see test/_bootstrap.js). A class toggle gates
+// every item from that class; a type toggle additionally gates
+// assignment/exam items by their type ('Exam' is one of the type toggles,
+// even though it's a separate item kind — see CAL_LEGEND_TYPES).
+function calLegendFilterPasses(item, filterClassIds, filterTypes) {
+  if (!filterClassIds[item.cls.id]) return false;
+  if (item.kind === 'exam')       return !!filterTypes['Exam'];
+  if (item.kind === 'assignment') return !!filterTypes[item.assignment.type];
+  return true; // lecture — class check above is the only gate
 }
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
@@ -1874,13 +1883,12 @@ class HoldCourseView extends ItemView {
     this.coursesSortKey = 'semester';
     this.coursesSortDir = 'desc';
     // Calendar session state
-    this.calView = 'month';
+    this.calView = 'month'; // 'month' | '3day' | 'week'
     this.calYear = null;
     this.calMonth = null;
-    this.calWeekStart = null;
-    this.calFilterClassId = null;
-    this.calFilterKind = null; // null='All' | 'lecture' | 'assignment' | 'exam'
-    this.calFilterType = null; // ASSIGNMENT_TYPES value; only meaningful when calFilterKind === 'assignment'
+    this.calAgendaStart = null; // ISO; anchors 3day/week, lazily set to today
+    this.calFilterClassIds = null; // lazily populated: { classId: true }, default all-on
+    this.calFilterTypes = null;    // lazily populated: { 'Reading': true, ... }, default all-on
     // Track open dropdown cleanup
     this._semDropEl = null;
     this._semCloseHandler = null;
@@ -3641,6 +3649,10 @@ class HoldCourseView extends ItemView {
     if (assignment.status === 'done' && (assignment.grade || '').trim()) {
       mid.createSpan({ cls: 'hc-grade-chip', text: assignment.grade.trim() });
     }
+    // No Horus button here: this row is fed only by _renderAssignmentList,
+    // which excludes Reading-type items — Horus's "open the book" button
+    // belongs on Readings specifically, see _renderReadingRow/
+    // _renderLectureAssignRows, not this one (it would never fire here).
     if ((assignment.linkedNote || '').trim()) {
       const openBtn = mid.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
@@ -5427,7 +5439,8 @@ class HoldCourseView extends ItemView {
     const today = new Date();
     if (this.calYear === null)  this.calYear  = today.getFullYear();
     if (this.calMonth === null) this.calMonth = today.getMonth();
-    if (!this.calWeekStart)    this.calWeekStart = getWeekStartISO(getTodayISO());
+    if (!this.calAgendaStart)   this.calAgendaStart = getTodayISO();
+    this._ensureCalFilterDefaults(sem);
 
     // ── Controls row ──────────────────────────────────────────────────────────
     const controls = content.createDiv('hc-cal-controls');
@@ -5437,8 +5450,11 @@ class HoldCourseView extends ItemView {
     if (this.calView === 'month') monthBtn.addClass('hc-cal-toggle-btn--active');
     const weekBtn = toggle.createEl('button', { cls: 'hc-cal-toggle-btn', text: 'Week' });
     if (this.calView === 'week') weekBtn.addClass('hc-cal-toggle-btn--active');
-    monthBtn.addEventListener('click', () => { this.calView = 'month'; this.render(); });
-    weekBtn.addEventListener('click',  () => { this.calView = 'week';  this.render(); });
+    const threeDayBtn = toggle.createEl('button', { cls: 'hc-cal-toggle-btn', text: '3-Day' });
+    if (this.calView === '3day') threeDayBtn.addClass('hc-cal-toggle-btn--active');
+    monthBtn.addEventListener('click',    () => { this.calView = 'month'; this.render(); });
+    threeDayBtn.addEventListener('click', () => { this.calView = '3day';  this.render(); });
+    weekBtn.addEventListener('click',     () => { this.calView = 'week';  this.render(); });
 
     const nav = controls.createDiv('hc-cal-nav');
     const prevBtn = nav.createEl('button', { cls: 'hc-cal-nav-btn' });
@@ -5465,20 +5481,41 @@ class HoldCourseView extends ItemView {
       this._renderCalLegend(content, sem);
       this._renderMonthGrid(content, sem);
     } else {
-      const weekEndISO = addDaysISO(this.calWeekStart, 6);
-      const ws = new Date(this.calWeekStart + 'T12:00:00');
-      const we = new Date(weekEndISO      + 'T12:00:00');
+      // Week is a 7-day agenda anchored on today, not a Monday-start grid —
+      // both modes page by 1 day so "starts at today" keeps holding as you
+      // move forward/back, not just on first open.
+      const dayCount = this.calView === '3day' ? 3 : 7;
+      const endISO = addDaysISO(this.calAgendaStart, dayCount - 1);
+      const start = new Date(this.calAgendaStart + 'T12:00:00');
+      const end   = new Date(endISO + 'T12:00:00');
       const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      titleEl.setText(`${fmt(ws)} – ${fmt(we)}`);
-      prevBtn.addEventListener('click', () => { this.calWeekStart = addDaysISO(this.calWeekStart, -7); this.render(); });
-      nextBtn.addEventListener('click', () => { this.calWeekStart = addDaysISO(this.calWeekStart,  7); this.render(); });
+      titleEl.setText(`${fmt(start)} – ${fmt(end)}`);
+      prevBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart, -1); this.render(); });
+      nextBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart,  1); this.render(); });
       this._renderCalLegend(content, sem);
-      this._renderWeekGrid(content, sem);
+      this._renderAgendaList(content, sem, dayCount);
     }
-
-    this._renderCalFilterBar(content, sem);
   }
 
+  // Fills in a default (all-on) entry for any class/type not yet present,
+  // without touching entries the user already toggled — so a class added
+  // later shows up by default instead of silently starting hidden.
+  _ensureCalFilterDefaults(sem) {
+    if (!this.calFilterClassIds) this.calFilterClassIds = {};
+    for (const cls of (sem.classes || [])) {
+      if (!(cls.id in this.calFilterClassIds)) this.calFilterClassIds[cls.id] = true;
+    }
+    if (!this.calFilterTypes) this.calFilterTypes = {};
+    for (const type of CAL_LEGEND_TYPES) {
+      if (!(type in this.calFilterTypes)) this.calFilterTypes[type] = true;
+    }
+  }
+
+  // The legend doubles as the filter: every dot is a class/type on/off
+  // toggle (clicking it flips `calFilterClassIds`/`calFilterTypes`), and each
+  // group label toggles every dot in its group at once. Replaces the old
+  // separate Class/Show/Type dropdown filter bar — this already lists the
+  // same things a filter needs, so there's no reason to draw it twice.
   _renderCalLegend(content, sem) {
     const classes = sem.classes || [];
     if (classes.length === 0) return;
@@ -5487,27 +5524,47 @@ class HoldCourseView extends ItemView {
 
     // Lectures group — colored by class
     const classGroup = legend.createDiv('hc-cal-legend-group');
-    classGroup.createSpan({ cls: 'hc-cal-legend-grouplabel', text: 'Lectures' });
+    const classGroupLabel = classGroup.createSpan({ cls: 'hc-cal-legend-grouplabel', text: 'Lectures' });
+    classGroupLabel.addEventListener('click', () => {
+      const allOn = classes.every(c => this.calFilterClassIds[c.id]);
+      for (const c of classes) this.calFilterClassIds[c.id] = !allOn;
+      this.render();
+    });
     for (const cls of classes) {
       const c = getColor(cls.colorIndex);
       const item = classGroup.createDiv('hc-cal-legend-item');
+      if (!this.calFilterClassIds[cls.id]) item.addClass('hc-cal-legend-item--off');
       const dot = item.createDiv('hc-cal-legend-dot');
       dot.style.background = c.fill;
       item.createSpan({ cls: 'hc-cal-legend-label', text: cls.code });
+      item.addEventListener('click', () => {
+        this.calFilterClassIds[cls.id] = !this.calFilterClassIds[cls.id];
+        this.render();
+      });
     }
 
     legend.createDiv('hc-cal-legend-sep');
 
-    // Assignment types group
+    // Assignment types group — Exam included; it's a separate item kind but
+    // shares this group visually and filters the same way (by due-date type).
     const typeGroup = legend.createDiv('hc-cal-legend-group');
-    typeGroup.createSpan({ cls: 'hc-cal-legend-grouplabel', text: 'Assignments' });
-    const typesToShow = ['Reading', 'Writing', 'Discussion', 'Project', 'Exam', 'Other'];
-    for (const type of typesToShow) {
+    const typeGroupLabel = typeGroup.createSpan({ cls: 'hc-cal-legend-grouplabel', text: 'Assignments' });
+    typeGroupLabel.addEventListener('click', () => {
+      const allOn = CAL_LEGEND_TYPES.every(t => this.calFilterTypes[t]);
+      for (const t of CAL_LEGEND_TYPES) this.calFilterTypes[t] = !allOn;
+      this.render();
+    });
+    for (const type of CAL_LEGEND_TYPES) {
       const style = getTypeStyle(type);
       const item = typeGroup.createDiv('hc-cal-legend-item');
+      if (!this.calFilterTypes[type]) item.addClass('hc-cal-legend-item--off');
       const dot = item.createDiv('hc-cal-legend-dot');
       dot.style.background = style.color;
       item.createSpan({ cls: 'hc-cal-legend-label', text: type });
+      item.addEventListener('click', () => {
+        this.calFilterTypes[type] = !this.calFilterTypes[type];
+        this.render();
+      });
     }
   }
 
@@ -5529,7 +5586,7 @@ class HoldCourseView extends ItemView {
       const d = new Date(dateISO + 'T12:00:00');
       const inMonth = d.getMonth() === this.calMonth && d.getFullYear() === this.calYear;
       const isToday = dateISO === todayISO;
-      const items   = this._applyCalKindFilter(getItemsForDate(sem, dateISO, this.calFilterClassId));
+      const items   = this._applyCalLegendFilter(getItemsForDate(sem, dateISO, null));
 
       const cell = grid.createDiv('hc-cal-cell');
       if (isToday)  cell.addClass('hc-cal-cell--today');
@@ -5572,200 +5629,77 @@ class HoldCourseView extends ItemView {
     }
   }
 
-  _renderWeekGrid(content, sem) {
+  // 3-Day and Week are the same renderer, just a different day count — both
+  // a vertical, today-first, one-day-at-a-time rolling agenda instead of the
+  // old Monday-anchored week grid. Each day gets a fixed-height box (rather
+  // than growing with item count) so the boxes stay visually uniform
+  // regardless of how much is scheduled on any one day; an unusually busy
+  // day scrolls internally instead of stretching the whole list.
+  _renderAgendaList(content, sem, dayCount) {
     const todayISO = getTodayISO();
-    const SHORT_DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    const root = content.createDiv('hc-cal-agenda');
 
-    const grid = content.createDiv('hc-cal-grid hc-cal-grid--week');
+    for (let i = 0; i < dayCount; i++) {
+      const dateISO = addDaysISO(this.calAgendaStart, i);
+      const isToday = dateISO === todayISO;
+      const items = this._applyCalLegendFilter(getItemsForDate(sem, dateISO, null));
 
-    // Header row
-    for (let i = 0; i < 7; i++) {
-      const dateISO = addDaysISO(this.calWeekStart, i);
+      const section = root.createDiv('hc-today-section hc-cal-agenda-day');
       const d = new Date(dateISO + 'T12:00:00');
-      const isToday = dateISO === todayISO;
-      const hdr = grid.createDiv('hc-cal-week-header');
-      if (isToday) hdr.addClass('hc-cal-week-header--today');
-      hdr.createDiv({ cls: 'hc-cal-week-header-day',  text: SHORT_DAYS[i] });
-      hdr.createDiv({ cls: 'hc-cal-week-header-date', text: String(d.getDate()) });
-    }
+      const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+        + (isToday ? ' · Today' : '');
+      const labelEl = section.createDiv({ cls: 'hc-today-section-label', text: label });
+      if (isToday) labelEl.addClass('hc-cal-agenda-day-label--today');
 
-    // Content row — cell click → popover (Option B)
-    for (let i = 0; i < 7; i++) {
-      const dateISO = addDaysISO(this.calWeekStart, i);
-      const isToday = dateISO === todayISO;
-      const items   = this._applyCalKindFilter(getItemsForDate(sem, dateISO, this.calFilterClassId));
-
-      const cell = grid.createDiv('hc-cal-week-cell');
-      if (isToday) cell.addClass('hc-cal-week-cell--today');
-      if (items.length > 0) {
-        cell.addClass('hc-cal-week-cell--has-items');
-        cell.addEventListener('click', () => this._showCalPopover(items, cell, dateISO));
+      if (items.length === 0) {
+        const weekday = d.toLocaleDateString('en-US', { weekday: 'long' });
+        section.createDiv({ cls: 'hc-today-empty-msg', text: `Nothing on ${weekday}.` });
+        continue;
       }
 
-      for (const item of items) {
-        const style = getCalItemStyle(item);
-        const overdue = this._isCalItemOverdue(item);
-        const done    = this._isCalItemDone(item);
-        let weekPillCls = 'hc-cal-week-pill';
-        if (item.kind === 'lecture') weekPillCls += ' hc-cal-week-pill--lecture';
-        const pill = cell.createDiv(weekPillCls);
-        if (done) {
-          pill.style.background = 'var(--background-modifier-border)';
-          pill.style.color = 'var(--text-muted)';
-          pill.style.textDecoration = 'line-through';
-        } else {
-          pill.style.background = style.bg;
-          pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
-        }
-        pill.setText(calItemDisplayTitle(item));
-      }
+      for (const item of items) this._renderAgendaItem(section, item);
     }
   }
 
-  _renderCalFilterBar(content, sem) {
-    const classes = sem.classes || [];
+  _renderAgendaItem(section, item) {
+    const style   = getCalItemStyle(item);
+    const overdue = this._isCalItemOverdue(item);
+    const done    = this._isCalItemDone(item);
+    const row     = section.createDiv('hc-today-item');
 
-    const bar = content.createDiv('hc-cal-filter-bar');
-    bar.createDiv({ cls: 'hc-cal-filter-label', text: 'Class' });
-
-    const filterWrap = bar.createDiv('hc-cal-filter-wrap');
-    const filterBtn  = filterWrap.createEl('button', { cls: 'hc-btn hc-btn--sm' });
-    const filterIcon = filterBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(filterIcon, 'filter');
-    const label = this.calFilterClassId
-      ? (classes.find(c => c.id === this.calFilterClassId)?.code || 'All classes')
-      : 'All classes';
-    filterBtn.createSpan({ text: label });
-    const chevron = filterBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(chevron, 'chevron-down');
-
-    let dropEl = null;
-    const closeDrop = () => { if (dropEl) { dropEl.remove(); dropEl = null; } };
-
-    filterBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (dropEl) { closeDrop(); return; }
-      dropEl = filterWrap.createDiv('hc-sem-drop hc-cal-filter-drop');
-
-      const allItem = dropEl.createDiv('hc-sem-drop-item');
-      if (!this.calFilterClassId) allItem.addClass('hc-sem-drop-item--active');
-      const allIcon = allItem.createSpan({ cls: 'hc-sem-drop-icon' });
-      if (!this.calFilterClassId) setIcon(allIcon, 'check');
-      allItem.createSpan({ text: 'All classes' });
-      allItem.addEventListener('click', () => { this.calFilterClassId = null; closeDrop(); this.render(); });
-
-      dropEl.createDiv('hc-sem-drop-divider');
-
-      for (const cls of classes) {
-        const item = dropEl.createDiv('hc-sem-drop-item');
-        if (cls.id === this.calFilterClassId) item.addClass('hc-sem-drop-item--active');
-        const icon = item.createSpan({ cls: 'hc-sem-drop-icon' });
-        if (cls.id === this.calFilterClassId) setIcon(icon, 'check');
-        const lbl = item.createSpan({ text: cls.code });
-        lbl.style.color = accentText(getColor(cls.colorIndex));
-        item.addEventListener('click', () => { this.calFilterClassId = cls.id; closeDrop(); this.render(); });
-      }
-
-      setTimeout(() => document.addEventListener('click', () => closeDrop(), { once: true }), 0);
-    });
-
-    // Show (kind) dropdown — mirrors the Class dropdown's shape.
-    bar.createDiv({ cls: 'hc-cal-filter-label', text: 'Show' });
-
-    const kindWrap = bar.createDiv('hc-cal-filter-wrap');
-    const kindBtn  = kindWrap.createEl('button', { cls: 'hc-btn hc-btn--sm' });
-    const kindIcon = kindBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(kindIcon, 'eye');
-    const kindOpt = CAL_KIND_OPTIONS.find(o => o.value === this.calFilterKind);
-    kindBtn.createSpan({ text: kindOpt ? kindOpt.label : 'All' });
-    const kindChevron = kindBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(kindChevron, 'chevron-down');
-
-    let kindDropEl = null;
-    const closeKindDrop = () => { if (kindDropEl) { kindDropEl.remove(); kindDropEl = null; } };
-
-    kindBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (kindDropEl) { closeKindDrop(); return; }
-      kindDropEl = kindWrap.createDiv('hc-sem-drop hc-cal-filter-drop');
-
-      for (const opt of CAL_KIND_OPTIONS) {
-        const item = kindDropEl.createDiv('hc-sem-drop-item');
-        if (opt.value === this.calFilterKind) item.addClass('hc-sem-drop-item--active');
-        const icon = item.createSpan({ cls: 'hc-sem-drop-icon' });
-        if (opt.value === this.calFilterKind) setIcon(icon, 'check');
-        item.createSpan({ text: opt.label });
-        item.addEventListener('click', () => {
-          this.calFilterKind = opt.value;
-          // Type only means something when narrowed to Assignments — clear it
-          // rather than leave a stale, invisible filter in effect.
-          if (opt.value !== 'assignment') this.calFilterType = null;
-          closeKindDrop();
-          this.render();
-        });
-      }
-
-      setTimeout(() => document.addEventListener('click', () => closeKindDrop(), { once: true }), 0);
-    });
-
-    // Type (assignment subtype) dropdown — drawn only when Show is narrowed
-    // to Assignments, since it can do nothing otherwise. Same rule the
-    // plugin already applies to "Show removed semesters."
-    if (this.calFilterKind === 'assignment') {
-      bar.createDiv({ cls: 'hc-cal-filter-label', text: 'Type' });
-
-      const typeWrap = bar.createDiv('hc-cal-filter-wrap');
-      const typeBtn  = typeWrap.createEl('button', { cls: 'hc-btn hc-btn--sm' });
-      const typeIcon = typeBtn.createSpan({ cls: 'hc-btn-icon' });
-      setIcon(typeIcon, 'tag');
-      typeBtn.createSpan({ text: this.calFilterType || 'All types' });
-      const typeChevron = typeBtn.createSpan({ cls: 'hc-btn-icon' });
-      setIcon(typeChevron, 'chevron-down');
-
-      let typeDropEl = null;
-      const closeTypeDrop = () => { if (typeDropEl) { typeDropEl.remove(); typeDropEl = null; } };
-
-      typeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (typeDropEl) { closeTypeDrop(); return; }
-        typeDropEl = typeWrap.createDiv('hc-sem-drop hc-cal-filter-drop');
-
-        const allTypeItem = typeDropEl.createDiv('hc-sem-drop-item');
-        if (!this.calFilterType) allTypeItem.addClass('hc-sem-drop-item--active');
-        const allTypeIcon = allTypeItem.createSpan({ cls: 'hc-sem-drop-icon' });
-        if (!this.calFilterType) setIcon(allTypeIcon, 'check');
-        allTypeItem.createSpan({ text: 'All types' });
-        allTypeItem.addEventListener('click', () => { this.calFilterType = null; closeTypeDrop(); this.render(); });
-
-        typeDropEl.createDiv('hc-sem-drop-divider');
-
-        for (const type of ASSIGNMENT_TYPES) {
-          const typeStyle = getTypeStyle(type);
-          const item = typeDropEl.createDiv('hc-sem-drop-item');
-          if (type === this.calFilterType) item.addClass('hc-sem-drop-item--active');
-          const icon = item.createSpan({ cls: 'hc-sem-drop-icon' });
-          if (type === this.calFilterType) setIcon(icon, 'check');
-          const lbl = item.createSpan({ text: type });
-          lbl.style.color = typeText(typeStyle);
-          item.addEventListener('click', () => { this.calFilterType = type; closeTypeDrop(); this.render(); });
-        }
-
-        setTimeout(() => document.addEventListener('click', () => closeTypeDrop(), { once: true }), 0);
-      });
+    const pill = row.createDiv('hc-today-pill');
+    if (done) {
+      pill.style.background = 'var(--background-modifier-border)';
+      pill.style.color      = 'var(--text-muted)';
+    } else {
+      pill.style.background = style.bg;
+      pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
     }
+    if (item.kind === 'lecture') pill.addClass('hc-today-pill--lecture');
+
+    const titleEl = pill.createDiv({ cls: 'hc-today-item-title', text: item.title });
+    if (done) titleEl.style.textDecoration = 'line-through';
+
+    const meta = pill.createDiv({ cls: 'hc-today-item-meta' });
+    let metaText;
+    if (item.kind === 'lecture') {
+      metaText = item.cls.code + ' · Lecture';
+      if (item.meetingStartTime) metaText += ' · ' + formatTimeRange(item.meetingStartTime, item.meetingEndTime);
+    } else if (item.kind === 'exam') {
+      metaText = item.cls.code + ' · Exam';
+    } else {
+      metaText = item.cls.code + ' · ' + item.assignment.type;
+    }
+    meta.setText(metaText);
+
+    row.addEventListener('click', () => this._navigateCalItem(item));
   }
 
-  // Applied at consumption, not inside getItemsForDate() — that function
-  // stays shared with the Today sidebar, which does not get these filters.
-  _applyCalKindFilter(items) {
-    let filtered = items;
-    if (this.calFilterKind) {
-      filtered = filtered.filter(i => i.kind === this.calFilterKind);
-    }
-    if (this.calFilterKind === 'assignment' && this.calFilterType) {
-      filtered = filtered.filter(i => i.assignment.type === this.calFilterType);
-    }
-    return filtered;
+  // Filters against the interactive legend's on/off state (_renderCalLegend
+  // above). Replaces the old single-select dropdown filters; see
+  // calLegendFilterPasses for the actual (unit-tested) predicate.
+  _applyCalLegendFilter(items) {
+    return items.filter(item => calLegendFilterPasses(item, this.calFilterClassIds, this.calFilterTypes));
   }
 
   _isCalItemOverdue(item) {
@@ -8303,6 +8237,7 @@ Object.assign(module.exports, {
   getLectureLocation,
   getLectureProfessor,
   validateLectureTime,
+  calLegendFilterPasses,
 });
 
 /* nosourcemap */
