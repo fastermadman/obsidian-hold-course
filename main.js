@@ -10,6 +10,7 @@ const {
   Notice,
   Menu,
   setIcon,
+  MarkdownRenderer,
   FuzzySuggestModal,
   Platform,
 } = require('obsidian');
@@ -3771,13 +3772,51 @@ class HoldCourseView extends ItemView {
 
     // Notes
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Notes' });
-    const textarea = content.createEl('textarea', { cls: 'hc-lecture-notes' });
-    textarea.value = resource.notes || '';
-    textarea.placeholder = 'Add notes…';
-    textarea.addEventListener('blur', () => {
-      resource.notes = textarea.value;
-      this.plugin.save();
-    });
+    this._renderClickToEditNote(content, resource, 'notes', 'Add notes…');
+  }
+
+  // #5a: show a note field as rendered Markdown; click it (or its empty-state
+  // placeholder) to drop into a raw textarea, blur to save and re-render.
+  // Reads/writes obj[key] in place — same contract as the plain textarea it
+  // replaces, so callers still just this.plugin.save() nothing extra.
+  _renderClickToEditNote(container, obj, key, placeholder) {
+    const wrap = container.createDiv('hc-note-edit');
+
+    const showEditor = () => {
+      wrap.empty();
+      const ta = wrap.createEl('textarea', { cls: 'hc-lecture-notes' });
+      ta.value = obj[key] || '';
+      ta.placeholder = placeholder;
+      ta.addEventListener('blur', () => {
+        obj[key] = ta.value;
+        this.plugin.save();
+        showPreview();
+      });
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    };
+
+    const showPreview = () => {
+      wrap.empty();
+      const val = obj[key] || '';
+      const preview = wrap.createDiv({
+        cls: val.trim() ? 'hc-note-preview' : 'hc-note-preview hc-note-preview--empty',
+        attr: { 'aria-label': 'Click to edit notes' },
+      });
+      if (val.trim()) {
+        MarkdownRenderer.render(this.app, val, preview, '', this);
+      } else {
+        preview.setText(placeholder);
+      }
+      // Let clicks on rendered links/checkboxes act normally instead of
+      // yanking the reader into edit mode.
+      preview.addEventListener('click', (evt) => {
+        if (evt.target.closest('a, input')) return;
+        showEditor();
+      });
+    };
+
+    showPreview();
   }
 
   // ─── Assignments (global) ─────────────────────────────────────────────────
