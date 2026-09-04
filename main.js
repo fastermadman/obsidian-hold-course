@@ -10,6 +10,7 @@ const {
   Notice,
   Menu,
   setIcon,
+  addIcon,
   MarkdownRenderer,
   FuzzySuggestModal,
   Platform,
@@ -19,6 +20,17 @@ const {
 
 const VIEW_TYPE = 'hold-course-view';
 const TODAY_VIEW_TYPE = 'hold-course-today';
+
+// Horus (a separate, sibling plugin — github.com/fastermadman/horus) owns a
+// paginated reader view for .md notes. Opening a linked note there is a
+// cross-plugin call via Obsidian's own view-type registry, not a dependency
+// on Horus's code — it's a no-op if Horus isn't installed/enabled. Both the
+// view type and icon are copied verbatim from horus/main.js (HORUS_ICON_ID /
+// HORUS_ICON_SVG / VIEW_TYPE_HORUS_READER) so the button matches Horus's own
+// branding and works even if Horus loads after Hold Course does.
+const HORUS_READER_VIEW_TYPE = 'horus-reader-view';
+const HORUS_ICON_ID = 'horus-eye';
+const HORUS_ICON_SVG = '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" transform="translate(-34.0128 -172.8595) scale(2.019295)"><path stroke-width="1.8" d="m21.847 104.44-0.52917-0.38806q0.56444-0.74083 1.8344-2.0461t3.1044-2.7517q1.8344-1.4817 4.1275-2.7869 2.2931-1.3406 4.9389-2.1872t5.5386-0.84667q2.0814 0 4.1275 0.52917 2.0461 0.49389 3.9158 1.27 1.905 0.74083 3.4572 1.5522 1.5522 0.81139 2.6106 1.4817 1.0583 0.635 1.4111 0.88194 0.38806 0.24694 1.1289 0.74083 0.74083 0.45861 1.5875 0.98778 0.88194 0.52917 1.6228 0.98778 0.77611 0.45861 1.1642 0.67027l-0.35278 0.59973q-0.38806-0.21167-1.1289-0.67028-0.74083-0.45861-1.6228-0.98778t-1.6581-1.0231q-0.77611-0.49388-1.1994-0.77611-0.35278-0.24694-1.3758-0.88194-0.98778-0.635-2.5047-1.4111-1.4817-0.77611-3.3161-1.5169-1.8344-0.74083-3.8453-1.2347t-4.0217-0.49389q-2.7869 0-5.3975 0.84667-2.5753 0.81139-4.7978 2.0814-2.2225 1.27-4.0217 2.7164-1.7639 1.4464-2.9986 2.7164-1.2347 1.2347-1.7992 1.9403zm18.239 22.86q-0.14111-1.6228-0.56444-3.5278-0.38806-1.905-0.98778-3.7394-0.56444-1.8344-1.27-3.2808-0.67028-1.4464-1.4464-2.152v-1.023q2.2225-0.45861 3.0692-1.4111 0.52917-0.59972 0.70556-1.4817 0.17639-0.88195 0.24694-2.0814-1.4464-0.14111-3.3514-0.45861t-3.9511-0.70556q-2.0108-0.42333-3.8453-0.81139-1.7992-0.38806-3.0692-0.67028-1.27-0.3175-1.6228-0.42333-0.56444 0.45861-0.98778 0.88194-0.42333 0.38806-0.59972 0.56445l-0.49389-0.49389q1.5169-1.517 3.6689-3.1397 2.1872-1.658 4.7272-3.0692 2.54-1.4464 5.2211-2.3283 2.7164-0.88194 5.3269-0.88194 3.3161 0 6.0325 0.9525 2.7517 0.91722 5.0094 2.2931 2.2931 1.3758 4.1981 2.6811 1.5522 1.0583 2.9281 1.905 1.3758 0.81139 2.5753 1.0583l-0.14111 0.70556q-0.84667-0.17639-1.7286-0.59973-0.84667-0.45861-1.8344-1.0583-0.21167 0.0706-1.4111 0.42333-1.1642 0.3175-2.9281 0.77612-1.7286 0.45861-3.7394 0.9525t-3.9511 0.88194q-1.905 0.35278-3.3867 0.52917l12.277 16.334q0.45861 0.635 1.1289 1.1642 0.70556 0.56444 1.7286 0.56444 1.1994 0 2.1167-0.77611 0.91722-0.74083 0.91722-2.0461 0-1.0583-0.70556-1.9403-0.67028-0.88195-1.8344-0.88195-1.0936 0-1.6933 0.74084-0.59972 0.74083-0.74083 1.4464l-0.67028-0.10583q0.10583-0.59973 0.45861-1.27 0.38806-0.635 1.0231-1.0936 0.67028-0.42333 1.6228-0.42333 1.4464 0 2.3283 1.0936 0.91722 1.0936 0.91722 2.4342 0 1.6228-1.1289 2.54-1.1289 0.9525-2.6106 0.9525-1.3053 0-2.1167-0.635-0.77611-0.635-1.3406-1.3406l-12.488-16.686h-0.03528v18.662zm0.74083-19.403q1.4111 0 2.54-0.67028 1.1289-0.70555 1.7992-1.8344 0.70556-1.1289 0.70556-2.5047 0-1.4111-0.70556-2.54-0.67028-1.1289-1.7992-1.7992-1.1289-0.70556-2.54-0.70556-1.3758 0-2.54 0.70556-1.1289 0.67028-1.8344 1.7992-0.67028 1.1289-0.67028 2.54 0 1.3758 0.67028 2.5047 0.70556 1.1289 1.8344 1.8344 1.1642 0.67028 2.54 0.67028zm3.1044-0.21167q1.7639-0.28222 3.81-0.74083 2.0814-0.45861 4.0217-0.9525 1.9403-0.52917 3.3867-0.91722 1.4464-0.42334 2.0108-0.56445l-1.4464-0.9525q-1.5522-1.0936-3.3867-2.2225-1.7992-1.1289-3.9158-2.0108-2.1167-0.91722-4.6214-1.3053 1.2347 0.74083 1.9756 2.0461 0.77611 1.27 0.77611 2.8222 0 1.517-0.74083 2.787-0.70556 1.2347-1.8697 2.0108zm-6.2794-0.0353q-1.1289-0.77612-1.8344-2.0108-0.70556-1.27-0.70556-2.7517 0-1.5169 0.70556-2.7517 0.70556-1.27 1.8697-2.0108-2.6458 0.52917-5.1153 1.7286-2.4694 1.1994-4.5156 2.6106-2.0108 1.3758-3.3867 2.5047 0.49389 0.14111 1.8697 0.45861 1.4111 0.3175 3.3161 0.74084 1.905 0.42333 3.9511 0.81139 2.0461 0.38805 3.8453 0.67028zm3.0692 18.979h0.21167v-17.992h-0.38806q-0.07056 1.3758-0.24694 2.3283-0.17639 0.91722-0.74083 1.5875-0.42333 0.45861-1.1642 0.84667-0.70556 0.38805-1.8344 0.635v0.24694q0.74083 0.70556 1.4111 2.1167t1.2347 3.175 0.9525 3.5983q0.42333 1.8697 0.56444 3.4572z"/></g>';
 
 const COLOR_PALETTE = [
   { name: 'amber',  accent: '#BA7517', accentDark: '#E5A34F', light: '#FAC775', bg: '#FAEEDA', text: '#633806' },
@@ -385,7 +397,7 @@ function getAllAssignments(semester) {
 // (obsidian.d.ts has no reindex/reconcile method), so it's wrapped in a
 // try/catch: if a future Obsidian version removes or renames it, this
 // falls through to the full-reload path below instead of throwing.
-async function openVaultNote(app, path) {
+async function resolveVaultFile(app, path) {
   let file = app.vault.getAbstractFileByPath(path);
   if (!file && await app.vault.adapter.exists(path)) {
     try {
@@ -395,13 +407,32 @@ async function openVaultNote(app, path) {
       // private API — fall through to the reload path below
     }
   }
-  if (file) {
-    app.workspace.openLinkText(path, '', false);
-  } else if (await app.vault.adapter.exists(path)) {
+  if (file) return file;
+  if (await app.vault.adapter.exists(path)) {
     new ConfirmReloadModal(app).open();
   } else {
     new Notice('Note not found in vault.');
   }
+  return null;
+}
+
+async function openVaultNote(app, path) {
+  const file = await resolveVaultFile(app, path);
+  if (file) app.workspace.openLinkText(path, '', false);
+}
+
+// Opens `path` in Horus's reader view (a new tab) instead of the default
+// markdown editor. Same file-resolution dance as openVaultNote — see
+// resolveVaultFile above — then a plain cross-plugin setViewState instead of
+// openLinkText. If Horus isn't installed/enabled, Obsidian just doesn't know
+// the view type and the tab renders empty; there's no clean way to detect
+// that upfront without importing Horus's code, so this stays a no-frills
+// best-effort call rather than adding a "is Horus installed" check. #22.
+async function openInHorus(app, path) {
+  const file = await resolveVaultFile(app, path);
+  if (!file) return;
+  const leaf = app.workspace.getLeaf('tab');
+  await leaf.setViewState({ type: HORUS_READER_VIEW_TYPE, active: true, state: { filePath: file.path } });
 }
 
 function getNextAssignmentDue(cls) {
@@ -881,6 +912,10 @@ class HoldCoursePlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new HoldCourseView(leaf, this));
     this.registerView(TODAY_VIEW_TYPE, (leaf) => new HoldCourseTodayView(leaf, this));
+    // Registered here too (not just by Horus itself) so the "Open in Horus"
+    // button's icon renders correctly regardless of plugin load order.
+    // addIcon() is idempotent — re-registering the same id is harmless. #22.
+    addIcon(HORUS_ICON_ID, HORUS_ICON_SVG);
 
     this.addRibbonIcon('graduation-cap', 'Hold Course', () => this.activateView());
     this.addRibbonIcon('calendar-clock', 'Hold Course — Today', () => this.activateTodayView());
@@ -2658,6 +2693,17 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
+    // Quick-open button for the linked note — same icon-button pattern as
+    // the lecture ROW's one-click open, so it's available up here too
+    // instead of only down in the Lecture Notes section below. No Horus
+    // button here: Horus is for opening books (Readings), and a lecture's
+    // linked note isn't one. #22.
+    if ((lec.vaultLink || '').trim()) {
+      const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', () => openVaultNote(this.app, lec.vaultLink));
+    }
+
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
     const deleteIcon = deleteBtn.createSpan({ cls: 'hc-btn-icon' });
     setIcon(deleteIcon, 'trash-2');
@@ -2809,6 +2855,31 @@ class HoldCourseView extends ItemView {
       const aInfo = aRow.createDiv('hc-lecture-assign-info');
       aInfo.createDiv({ cls: 'hc-lecture-assign-title', text: a.title });
       if (a.status) aInfo.createDiv({ cls: 'hc-lecture-assign-status', text: a.status });
+
+      // #22 — quick-open pair, its own flex row (not inside aInfo, which
+      // stacks its children as block text) so the two buttons sit side by
+      // side instead of on top of each other, next to the due-date column.
+      // Horus only for Readings (the assignment type that's actually a
+      // book) — see _renderReadingRow for the same rule.
+      if ((a.linkedNote || '').trim()) {
+        const iconActions = aRow.createDiv('hc-row-icon-actions');
+        const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+        setIcon(openBtn, 'external-link');
+        openBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          openVaultNote(this.app, a.linkedNote);
+        });
+
+        if (a.type === 'Reading') {
+          const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+          setIcon(horusBtn, HORUS_ICON_ID);
+          horusBtn.addEventListener('click', (evt) => {
+            evt.stopPropagation();
+            openInHorus(this.app, a.linkedNote);
+          });
+        }
+      }
+
       if (a.dueDate) {
         const info = getDueInfo(a.dueDate);
         const dueEl = aRow.createDiv('hc-lecture-assign-due');
@@ -3113,13 +3184,27 @@ class HoldCourseView extends ItemView {
     // Linked-note flag — same silent-when-absent treatment as the Lectures
     // tab's own vaultLink flag: nothing rendered when there's no linked
     // note, a quiet label when there is. #9 (LiveAQuietLife, 2026-09-01)
+    //
+    // #22 — the quick-open/Horus buttons are their own flex sibling (not
+    // inside `mid`, which stacks its children as block text) so they sit
+    // side by side next to the due-date column instead of on top of each
+    // other. Every Reading here is a book, so Horus always applies.
     if ((assignment.linkedNote || '').trim()) {
       mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
-      const openBtn = mid.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+
+      const iconActions = row.createDiv('hc-row-icon-actions');
+      const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
         openVaultNote(this.app, assignment.linkedNote);
+      });
+
+      const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, assignment.linkedNote);
       });
     }
 
@@ -3286,6 +3371,22 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
+    // Quick-open button for the linked note (#22). Horus is only offered on
+    // Readings — that's the assignment type that's actually a book, so it's
+    // the one Horus (a book reader) makes sense for; to start with, at
+    // least (easy to widen to Writing too if that turns out to want it).
+    if ((assignment.linkedNote || '').trim()) {
+      const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', () => openVaultNote(this.app, assignment.linkedNote));
+
+      if (assignment.type === 'Reading') {
+        const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+        setIcon(horusBtn, HORUS_ICON_ID);
+        horusBtn.addEventListener('click', () => openInHorus(this.app, assignment.linkedNote));
+      }
+    }
+
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
     const deleteIcon = deleteBtn.createSpan({ cls: 'hc-btn-icon' });
     setIcon(deleteIcon, 'trash-2');
@@ -3349,6 +3450,10 @@ class HoldCourseView extends ItemView {
             const openBtn = bookActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
             setIcon(openBtn, 'external-link');
             openBtn.addEventListener('click', () => openVaultNote(this.app, res.vaultLink));
+
+            const horusBtn = bookActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+            setIcon(horusBtn, HORUS_ICON_ID);
+            horusBtn.addEventListener('click', () => openInHorus(this.app, res.vaultLink));
           }
           const changeBtn = bookActions.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Change' });
           changeBtn.addEventListener('click', () => {
@@ -3847,6 +3952,18 @@ class HoldCourseView extends ItemView {
         this.render();
       }).open();
     });
+
+    // Quick-open buttons for the vault link (#22 — same pair as Lecture detail;
+    // this is the plugin's "book" entity, so Horus is the obvious fit here).
+    if ((resource.vaultLink || '').trim()) {
+      const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', () => openVaultNote(this.app, resource.vaultLink));
+
+      const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', () => openInHorus(this.app, resource.vaultLink));
+    }
 
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
     const deleteIcon = deleteBtn.createSpan({ cls: 'hc-btn-icon' });
