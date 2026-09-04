@@ -1234,6 +1234,13 @@
 .hc-note-preview > :first-child { margin-top: 0; }
 .hc-note-preview > :last-child { margin-bottom: 0; }
 
+/* #5b: shown under a linked note file Hold Course didn't create (read-only) */
+.hc-note-foreign-hint {
+  margin-top: 6px;
+  font-size: 0.85em;
+  color: var(--text-faint);
+}
+
 /* --- Lecture assignments --------------------------------------------------- */
 
 .hc-lecture-assign-list {

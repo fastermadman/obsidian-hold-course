@@ -123,6 +123,46 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
+// #5b: helpers for "file is truth" resource notes — the note body lives in a
+// vault markdown file Hold Course owns, not in data.json. Kept as pure
+// functions so the parsing/formatting is unit-testable without the app.
+
+// Split a leading `--- ... ---` YAML block off the rest of a note. Returns the
+// block verbatim (trailing newline included, or '') plus the body after it.
+function splitFrontmatter(text) {
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text || '');
+  if (!m) return { frontmatter: '', body: text || '' };
+  return { frontmatter: m[0], body: (text || '').slice(m[0].length) };
+}
+
+// Make a resource title safe as a filename: drop the characters Obsidian and
+// the common filesystems reject, collapse whitespace, cap the length.
+function sanitizeNoteFilename(name) {
+  const clean = String(name || '')
+    .replace(/[\\/:*?"<>|#^[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100)
+    .trim();
+  return clean || 'Untitled';
+}
+
+// The initial contents of an auto-created note stub: hc_* frontmatter that
+// ties the file back to its resource (id survives a rename/move), an optional
+// wikilink to the source material, then any migrated data.json notes text.
+function buildNoteStub(resource, classCode, sourceLink) {
+  const q = (v) => JSON.stringify(String(v));
+  const fm = ['---', `hc_resource_id: ${q(resource.id)}`, `hc_title: ${q(resource.title || '')}`];
+  if (resource.author) fm.push(`hc_author: ${q(resource.author)}`);
+  if (classCode) fm.push(`hc_class: ${q(classCode)}`);
+  fm.push('---', '');
+  let out = fm.join('\n') + '\n';
+  if (sourceLink) out += `Kilde: [[${sourceLink.replace(/\.md$/, '')}]]\n\n`;
+  const body = (resource.notes || '').trim();
+  if (body) out += body + '\n';
+  return out;
+}
+
 // A semester's position on the timeline. null means it has none at all — no
 // year — and those sort last in BOTH directions, because reversing them would
 // assert they are the oldest. A semester with a year but no term does have a
@@ -1494,6 +1534,33 @@ class HoldCourseSettingTab extends PluginSettingTab {
     };
     minusBtn.addEventListener('click', () => step(-0.1));
     plusBtn.addEventListener('click', () => step(0.1));
+
+    // #5b: opt-in. Off (default) keeps every resource note in data.json as a
+    // plain string. On, a resource's notes live in a vault markdown file Hold
+    // Course creates and owns — edit it here or in Obsidian, the file wins.
+    // Stored in data.json (not device-settings.json): the note files sync
+    // between devices, so this decision has to travel with them.
+    new Setting(containerEl)
+      .setName('Book notes as vault files')
+      .setDesc('Store each resource\'s notes in their own markdown file instead of inside the plugin\'s data. The file is the source of truth; existing notes are moved into it the first time you edit. Hold Course only ever writes files it created itself.')
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.data.fileIsTruth === true)
+        .onChange(async (value) => {
+          this.plugin.data.fileIsTruth = value;
+          await this.plugin.save();
+          this.plugin.refreshAllViews();
+        }));
+
+    new Setting(containerEl)
+      .setName('Book notes folder')
+      .setDesc('Where auto-created note files go. Relative to the vault root.')
+      .addText((text) => text
+        .setPlaceholder('HoldCourse/Books')
+        .setValue(this.plugin.data.notesFolder || '')
+        .onChange(async (value) => {
+          this.plugin.data.notesFolder = value.trim();
+          await this.plugin.save();
+        }));
   }
 }
 
@@ -3826,7 +3893,7 @@ class HoldCourseView extends ItemView {
 
     // Notes
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Notes' });
-    this._renderClickToEditNote(content, resource, 'notes', 'Add notes…');
+    this._renderResourceNote(content, resource, sem);
   }
 
   // #5a: show a note field as rendered Markdown; click it (or its empty-state
@@ -3882,6 +3949,149 @@ class HoldCourseView extends ItemView {
     };
 
     showPreview();
+  }
+
+  // #5b: resource Notes when "file is truth" is on. The body lives in a vault
+  // markdown file Hold Course auto-creates and owns (hc_* frontmatter); this
+  // reads it on open and writes it back on blur — no vault-modify watcher, so
+  // it stays loop-safe by construction. Legacy mode (notes as a data.json
+  // string) falls straight through to _renderClickToEditNote unchanged.
+  //
+  // ponytail: this parallels _renderClickToEditNote's editor/preview/
+  // swallow-click dance rather than sharing it — that helper is on the working
+  // #5a path for lectures/assignments/exams. #5b session 2 moves those onto
+  // file-backed notes too; unify the two then, not now.
+  _renderResourceNote(container, resource, sem) {
+    if (this.plugin.data.fileIsTruth !== true) {
+      this._renderClickToEditNote(container, resource, 'notes', 'Add notes…');
+      return;
+    }
+
+    const wrap = container.createDiv('hc-note-edit');
+    let swallowNextClick = false;
+    const armSwallow = () => {
+      swallowNextClick = true;
+      setTimeout(() => { swallowNextClick = false; }, 0);
+    };
+
+    const showEditor = (file, body) => {
+      wrap.empty();
+      const ta = wrap.createEl('textarea', { cls: 'hc-lecture-notes' });
+      ta.value = body;
+      ta.placeholder = 'Add notes…';
+      ta.addEventListener('blur', async () => {
+        armSwallow();
+        await this._writeNoteBody(file, ta.value);
+        render();
+      });
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    };
+
+    const render = async () => {
+      wrap.empty();
+      const file = await this._resolveNoteFile(resource.notesLink || '');
+
+      // No file yet: click the placeholder to create the stub and drop into it.
+      if (!file) {
+        const preview = wrap.createDiv({
+          cls: 'hc-note-preview hc-note-preview--empty',
+          attr: { 'aria-label': 'Click to create a note file' },
+        });
+        preview.setText('Add notes…');
+        preview.addEventListener('click', async () => {
+          if (swallowNextClick) { swallowNextClick = false; return; }
+          await this._createNoteStub(resource, sem);
+          render();
+        });
+        return;
+      }
+
+      let raw = '';
+      try { raw = await this.app.vault.read(file); } catch (e) { raw = ''; }
+      const body = splitFrontmatter(raw).body.trim();
+      const owned = this._ownsNoteFile(file, resource);
+
+      const preview = wrap.createDiv({
+        cls: body ? 'hc-note-preview' : 'hc-note-preview hc-note-preview--empty',
+        attr: { 'aria-label': owned ? 'Click to edit notes' : 'Open in Obsidian to edit' },
+      });
+      if (body) {
+        MarkdownRenderer.render(this.app, body, preview, resource.notesLink, this);
+      } else {
+        preview.setText('Add notes…');
+      }
+
+      // Idempotency rule: Hold Course never writes a file it didn't create.
+      // A linked note without our hc_resource_id is read-only here.
+      if (!owned) {
+        wrap.createDiv({
+          cls: 'hc-note-foreign-hint',
+          text: 'Linked file not created by Hold Course — open it in Obsidian to edit.',
+        });
+        return;
+      }
+
+      preview.addEventListener('click', (evt) => {
+        if (swallowNextClick) { swallowNextClick = false; return; }
+        if (evt.target.closest('a, input')) return;
+        showEditor(file, body);
+      });
+    };
+
+    render();
+  }
+
+  // Same stale-index guard as openVaultNote: a just-synced file can be real on
+  // disk but missing from Obsidian's in-memory index. Returns the TFile or null.
+  async _resolveNoteFile(path) {
+    if (!path) return null;
+    let file = this.app.vault.getAbstractFileByPath(path);
+    if (!file && await this.app.vault.adapter.exists(path)) {
+      try {
+        await this.app.vault.adapter.reconcileFile(path, path, false);
+        file = this.app.vault.getAbstractFileByPath(path);
+      } catch (e) {
+        // private API — treat as not-yet-indexed
+      }
+    }
+    return file;
+  }
+
+  // ponytail: notesLink-path match is the session-1 truth (we're the only
+  // writer of that field). The frontmatter hc_resource_id check is the
+  // rename/move-proof path #5b session 2 leans on for re-matching.
+  _ownsNoteFile(file, resource) {
+    if (resource.notesLink && file && resource.notesLink === file.path) return true;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return !!fm && fm.hc_resource_id === resource.id;
+  }
+
+  // Replace the note body, leaving any frontmatter block untouched.
+  async _writeNoteBody(file, newBody) {
+    await this.app.vault.process(file, (data) => {
+      const fm = splitFrontmatter(data).frontmatter;
+      const head = fm ? fm.trimEnd() + '\n\n' : '';
+      return head + newBody.replace(/^\s*\n/, '').trimEnd() + '\n';
+    });
+  }
+
+  async _createNoteStub(resource, sem) {
+    const folder = (this.plugin.data.notesFolder || 'HoldCourse/Books').replace(/^\/+|\/+$/g, '');
+    if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
+      try { await this.app.vault.createFolder(folder); } catch (e) { /* already there */ }
+    }
+    const cls = (sem.classes || []).find(c => (resource.classIds || []).includes(c.id));
+    const base = sanitizeNoteFilename(resource.title);
+    let path = folder ? `${folder}/${base}.md` : `${base}.md`;
+    for (let n = 2; await this.app.vault.adapter.exists(path); n++) {
+      path = folder ? `${folder}/${base} (${n}).md` : `${base} (${n}).md`;
+    }
+    await this.app.vault.create(path, buildNoteStub(resource, cls ? cls.code : '', resource.vaultLink || ''));
+    resource.notesLink = path;
+    resource.notes = ''; // migrated into the file — file is truth now
+    await this.plugin.save();
+    return path;
   }
 
   // ─── Assignments (global) ─────────────────────────────────────────────────
@@ -7214,6 +7424,9 @@ Object.assign(module.exports, {
   openVaultNote,
   ConfirmReloadModal,
   normalizeSettings,
+  splitFrontmatter,
+  sanitizeNoteFilename,
+  buildNoteStub,
 });
 
 /* nosourcemap */
