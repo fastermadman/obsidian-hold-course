@@ -1192,6 +1192,16 @@
   margin-top: 24px;
 }
 
+.hc-lecture-section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hc-lecture-section-label-row .hc-lecture-section-label {
+  margin-bottom: 0;
+}
+
 .hc-lecture-notes {
   width: 100%;
   min-height: 140px;

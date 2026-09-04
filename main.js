@@ -2332,7 +2332,18 @@ class HoldCourseView extends ItemView {
       const cls = sem.classes.find(c => c.id === o.classId);
       const lec = cls && cls.lectures.find(l => l.id === o.lectureId);
       if (!lec) return null;
-      const items = (lec.assignments || []).map(a => ({ screen: 'assignment', classId: cls.id, lectureId: lec.id, assignmentId: a.id }));
+      // Mirrors the lecture detail screen's own two hide-done toggles
+      // (readingsShowDone/assignShowDone, added alongside this fix) — same
+      // reasoning as the class-tab branch below: a "next" click must not
+      // land on a row the screen you were looking at had actually hidden.
+      const readingsShowDone = cls.readingsShowDone !== false;
+      const assignShowDone = cls.assignShowDone !== false;
+      const items = (lec.assignments || [])
+        .filter(a => {
+          const showDone = a.type === 'Reading' ? readingsShowDone : assignShowDone;
+          return showDone || a.status !== 'done';
+        })
+        .map(a => ({ screen: 'assignment', classId: cls.id, lectureId: lec.id, assignmentId: a.id }));
       const index = items.findIndex(it => it.assignmentId === this.currentAssignmentId);
       return index === -1 ? null : { items, index };
     }
@@ -2342,7 +2353,12 @@ class HoldCourseView extends ItemView {
       if (!cls) return null;
 
       if (!o.tab || o.tab === 'Lectures') {
-        const sorted = getLecturesSorted(cls);
+        // Mirrors _renderLectureList's own cls.lectureShowDone filter — same
+        // "found on-device" gap as the two branches above: this one already
+        // had a working toggle, it just wasn't being read here.
+        const showDone = cls.lectureShowDone !== false;
+        let sorted = getLecturesSorted(cls);
+        if (!showDone) sorted = sorted.filter(l => l.status !== 'done');
         const items = sorted.map(l => ({ screen: 'lecture', classId: cls.id, lectureId: l.id }));
         const index = items.findIndex(it => it.lectureId === this.currentLectureId);
         return index === -1 ? null : { items, index };
@@ -3237,21 +3253,55 @@ class HoldCourseView extends ItemView {
     // even before anything's been added. (LiveAQuietLife, 2026-09-01)
     const lecAssignments = lec.assignments || [];
 
-    content.createDiv({ cls: 'hc-lecture-section-label', text: 'Readings' });
+    // Hide-done reuses the SAME flags as the class's Readings/Assignments
+    // tabs (cls.readingsShowDone/cls.assignShowDone) rather than a new,
+    // lecture-local field — toggling either one is "hide done work for this
+    // class", true regardless of which screen you're looking at it from.
+    // Was previously missing here entirely (the lecture screen always showed
+    // everything); found on-device as an inconsistency between this screen's
+    // chevrons and the class tab's.
+    if (cls.readingsShowDone === undefined) cls.readingsShowDone = true;
+    if (cls.assignShowDone === undefined) cls.assignShowDone = true;
+    const readingsShowDone = cls.readingsShowDone;
+    const assignShowDone = cls.assignShowDone;
+
+    const readingsLabelRow = content.createDiv('hc-lecture-section-label-row');
+    readingsLabelRow.createDiv({ cls: 'hc-lecture-section-label', text: 'Readings' });
+    const readingsDoneToggle = readingsLabelRow.createEl('button', { cls: 'hc-btn hc-btn--sm' });
+    setIcon(readingsDoneToggle.createSpan({ cls: 'hc-btn-icon' }), readingsShowDone ? 'eye-off' : 'eye');
+    readingsDoneToggle.createSpan({ text: readingsShowDone ? 'Hide done' : 'Show done' });
+    readingsDoneToggle.addEventListener('click', () => {
+      cls.readingsShowDone = !cls.readingsShowDone;
+      this.plugin.save();
+      this.render();
+    });
     const readingList = content.createDiv('hc-lecture-assign-list');
+    let readings = lecAssignments.filter(a => a.type === 'Reading');
+    if (!readingsShowDone) readings = readings.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       readingList,
-      lecAssignments.filter(a => a.type === 'Reading'),
+      readings,
       cls, lec,
       'No readings for this lecture.'
     );
 
     // Assignments section
-    content.createDiv({ cls: 'hc-lecture-section-label', text: 'Assignments' });
+    const assignLabelRow = content.createDiv('hc-lecture-section-label-row');
+    assignLabelRow.createDiv({ cls: 'hc-lecture-section-label', text: 'Assignments' });
+    const assignDoneToggle = assignLabelRow.createEl('button', { cls: 'hc-btn hc-btn--sm' });
+    setIcon(assignDoneToggle.createSpan({ cls: 'hc-btn-icon' }), assignShowDone ? 'eye-off' : 'eye');
+    assignDoneToggle.createSpan({ text: assignShowDone ? 'Hide done' : 'Show done' });
+    assignDoneToggle.addEventListener('click', () => {
+      cls.assignShowDone = !cls.assignShowDone;
+      this.plugin.save();
+      this.render();
+    });
     const assignList = content.createDiv('hc-lecture-assign-list');
+    let assignments = lecAssignments.filter(a => a.type !== 'Reading');
+    if (!assignShowDone) assignments = assignments.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       assignList,
-      lecAssignments.filter(a => a.type !== 'Reading'),
+      assignments,
       cls, lec,
       'No assignments for this lecture.'
     );
