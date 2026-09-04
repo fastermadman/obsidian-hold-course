@@ -49,6 +49,11 @@
   color: var(--text-normal);
   letter-spacing: -0.01em;
   flex-shrink: 0;
+  cursor: pointer;
+}
+
+.hc-logo:hover {
+  opacity: 0.8;
 }
 
 .hc-logo-accent {

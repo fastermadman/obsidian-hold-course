@@ -2092,10 +2092,14 @@ class HoldCourseView extends ItemView {
   _renderToolbar(root) {
     const toolbar = root.createDiv('hc-toolbar');
 
-    // Logo
+    // Logo — acts as a home/Overview link, same target as the "Overview" nav
+    // button below (not the breadcrumb root's Courses-aware target: a logo
+    // click is a website convention for "take me home", not "take me back
+    // to wherever I entered from").
     const logo = toolbar.createDiv('hc-logo');
     logo.createSpan({ text: 'Hold' });
     logo.createSpan({ cls: 'hc-logo-accent', text: 'Course' });
+    logo.addEventListener('click', () => this.navigate('dashboard'));
 
     // Breadcrumb
     const bc = toolbar.createDiv('hc-breadcrumb');
