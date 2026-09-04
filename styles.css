@@ -2471,6 +2471,10 @@
   min-width: 220px;
   max-width: 260px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  /* max-height is also set inline in JS, sized to the actual space below
+     `top` — this is just the fallback so items are always reachable even if
+     that inline value is ever missing. */
+  overflow-y: auto;
 }
 
 .hc-cal-popover-date {

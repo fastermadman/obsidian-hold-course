@@ -5712,6 +5712,12 @@ class HoldCourseView extends ItemView {
     const top = Math.max(8, Math.min(rect.top, window.innerHeight - 320));
     pop.style.left = `${left}px`;
     pop.style.top  = `${top}px`;
+    // `top` above is only clamped so the popover doesn't START off-screen —
+    // it doesn't limit how tall the item list can grow, so a day with more
+    // items than fit below `top` used to overflow past the viewport bottom
+    // with no way to scroll to them. Cap the actual height to the space
+    // that's really there; CSS's overflow-y then scrolls the rest.
+    pop.style.maxHeight = `${window.innerHeight - top - 8}px`;
 
     pop.createDiv({ cls: 'hc-cal-popover-date', text: formatDateLong(dateISO) });
 
