@@ -9,6 +9,12 @@ const { HoldCourseView } = require('./_bootstrap.js');
 // stubbed to nothing. Callers that DO stub render() (most tests here) are
 // testing navigate()'s bookkeeping in isolation from rendering; the one test
 // that needs render() to actually run (the re-entrancy guard) says so.
+//
+// Not covered here on purpose: whether scrollTop actually ends up where it
+// should on screen. origin.scrollTop and _navigateToOrigin()'s restore both
+// read a real .hc-content element (_getScrollEl()), which _bootstrap.js
+// deliberately doesn't stub — see its own comment. That's an on-device check
+// (#33: "scrolled list → open row → back → same offset"), not a unit test.
 function makeView() {
   const view = new HoldCourseView(null, {});
   view.render = () => {};
