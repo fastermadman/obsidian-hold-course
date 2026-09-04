@@ -735,12 +735,34 @@ function getCalItemStyle(item) {
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
+// #10: coerce a loaded device-settings blob into a complete object so
+// callers never hit undefined, whatever shape the file (or a legacy inline
+// block) was in. `null`/garbage → all defaults.
+function normalizeSettings(obj, defaultScale) {
+  const s = obj && typeof obj === 'object' ? obj : {};
+  return {
+    einkMode: s.einkMode === true,
+    mobileScale: typeof s.mobileScale === 'number' ? s.mobileScale : defaultScale,
+  };
+}
+
 class HoldCoursePlugin extends Plugin {
   async onload() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
     const defaultScale = Platform.isMobile ? 1.1 : 1.0;
-    this.data.settings = this.data.settings || { einkMode: false, mobileScale: defaultScale };
-    if (this.data.settings.mobileScale === undefined) this.data.settings.mobileScale = defaultScale;
+
+    // #10: device-local settings (grayscale mode, view scale) persist to
+    // their own file, not inside data.json. That way viastudywiz's content
+    // sync can rewrite data.json wholesale without clobbering per-device
+    // prefs, and this plugin writing prefs can't clobber synced content.
+    // Migrate a legacy inline `settings` block out on first load; the
+    // migration save below then strips the now-dead key from data.json.
+    const inlineSettings = this.data.settings;
+    delete this.data.settings;
+    const diskSettings = await this._loadSettingsFile();
+    this.settings = normalizeSettings(diskSettings || inlineSettings, defaultScale);
+    if (!diskSettings && inlineSettings) await this.saveSettings();
+
     this.applyEinkClass();
     this.applyMobileScale();
 
@@ -750,6 +772,7 @@ class HoldCoursePlugin extends Plugin {
     // directly rather than save() — no views exist yet at this point.
     let changed = this._migrateSemesters();
     if (this._migrateDataVersion()) changed = true;
+    if (inlineSettings) changed = true; // drop the moved-out `settings` key
     if (changed) await this.saveData(this.data);
 
     this.registerView(VIEW_TYPE, (leaf) => new HoldCourseView(leaf, this));
@@ -856,12 +879,12 @@ class HoldCoursePlugin extends Plugin {
   }
 
   applyEinkClass() {
-    einkActive = this.data.settings.einkMode;
+    einkActive = this.settings.einkMode;
     document.body.classList.toggle('hc-eink', einkActive);
   }
 
   applyMobileScale() {
-    document.body.style.setProperty('--hc-mobile-scale', this.data.settings.mobileScale);
+    document.body.style.setProperty('--hc-mobile-scale', this.settings.mobileScale);
   }
 
   refreshAllViews() {
@@ -889,6 +912,7 @@ class HoldCoursePlugin extends Plugin {
   // 2026-08-30 — see issue #2)
   async onExternalSettingsChange() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
+    delete this.data.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
     this.refreshTodayView();
     this.refreshMainView();
   }
@@ -943,6 +967,36 @@ class HoldCoursePlugin extends Plugin {
   async save() {
     await this.saveData(this.data);
     this.refreshTodayView();
+  }
+
+  // #10: device-local settings live beside data.json in their own file.
+  // loadData()/saveData() only ever touch data.json, so these go through
+  // the vault adapter directly. Read/parse failures fall back to null so
+  // onload can apply defaults rather than crash on a hand-mangled file.
+  _settingsFilePath() {
+    return `${this.manifest.dir}/device-settings.json`;
+  }
+
+  async _loadSettingsFile() {
+    try {
+      const path = this._settingsFilePath();
+      if (!(await this.app.vault.adapter.exists(path))) return null;
+      return JSON.parse(await this.app.vault.adapter.read(path));
+    } catch (e) {
+      console.error('Hold Course: could not read device-settings.json', e);
+      return null;
+    }
+  }
+
+  async saveSettings() {
+    try {
+      await this.app.vault.adapter.write(
+        this._settingsFilePath(),
+        JSON.stringify(this.settings, null, 2),
+      );
+    } catch (e) {
+      console.error('Hold Course: could not write device-settings.json', e);
+    }
   }
 
   // ─── Semester helpers ──────────────────────────────────────────────────────
@@ -1412,12 +1466,12 @@ class HoldCourseSettingTab extends PluginSettingTab {
       .setName('Grayscale display mode')
       .setDesc('Increases text contrast and size, and swaps class/type colors for a true grayscale palette. For e-ink displays (e.g. Boox tablets), where low-contrast text can wash out under fast refresh — also useful if you run your phone or tablet in grayscale for fewer distractions.')
       .addToggle((toggle) => toggle
-        .setValue(this.plugin.data.settings.einkMode)
+        .setValue(this.plugin.settings.einkMode)
         .onChange(async (value) => {
-          this.plugin.data.settings.einkMode = value;
+          this.plugin.settings.einkMode = value;
           this.plugin.applyEinkClass();
           this.plugin.refreshAllViews();
-          await this.plugin.save();
+          await this.plugin.saveSettings();
         }));
 
     const scaleSetting = new Setting(containerEl)
@@ -1427,15 +1481,15 @@ class HoldCourseSettingTab extends PluginSettingTab {
     const minusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '−' });
     const label = scaleSetting.controlEl.createSpan({
       cls: 'hc-settings-scale-label',
-      text: `${Math.round(this.plugin.data.settings.mobileScale * 100)}%`,
+      text: `${Math.round(this.plugin.settings.mobileScale * 100)}%`,
     });
     const plusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '+' });
 
     const step = async (delta) => {
-      const next = Math.min(1.5, Math.max(0.9, Math.round((this.plugin.data.settings.mobileScale + delta) * 10) / 10));
-      this.plugin.data.settings.mobileScale = next;
+      const next = Math.min(1.5, Math.max(0.9, Math.round((this.plugin.settings.mobileScale + delta) * 10) / 10));
+      this.plugin.settings.mobileScale = next;
       this.plugin.applyMobileScale();
-      await this.plugin.save();
+      await this.plugin.saveSettings();
       label.setText(`${Math.round(next * 100)}%`);
     };
     minusBtn.addEventListener('click', () => step(-0.1));
@@ -7159,6 +7213,7 @@ module.exports = HoldCoursePlugin;
 Object.assign(module.exports, {
   openVaultNote,
   ConfirmReloadModal,
+  normalizeSettings,
 });
 
 /* nosourcemap */
