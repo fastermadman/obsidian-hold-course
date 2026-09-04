@@ -1212,6 +1212,50 @@
   color: var(--text-faint);
 }
 
+/* #5a: rendered-Markdown preview that swaps to .hc-lecture-notes on click */
+.hc-note-preview {
+  padding: 12px 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  line-height: 1.6;
+  cursor: text;
+  transition: border-color 0.15s;
+}
+
+.hc-note-preview:hover {
+  border-color: var(--background-modifier-border-hover);
+}
+
+.hc-note-preview--empty {
+  min-height: 140px;
+  color: var(--text-faint);
+}
+
+.hc-note-preview > :first-child { margin-top: 0; }
+.hc-note-preview > :last-child { margin-bottom: 0; }
+
+/* #5b: shown under a linked note file Hold Course didn't create (read-only) */
+.hc-note-foreign-hint {
+  margin-top: 6px;
+  font-size: 0.85em;
+  color: var(--text-faint);
+}
+
+/* #5b Del B: teachers' lesson description — sync-owned, read-only next to the
+   editable notes below it. Flat (no border) so it reads as given, not typed. */
+.hc-lecture-description {
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.hc-lecture-description > :first-child { margin-top: 0; }
+.hc-lecture-description > :last-child { margin-bottom: 0; }
+
 /* --- Lecture assignments --------------------------------------------------- */
 
 .hc-lecture-assign-list {
@@ -1818,6 +1862,20 @@
 
 .hc-resource-open-btn:hover { background: var(--background-secondary); color: var(--text-normal); }
 .hc-resource-open-btn svg { width: 14px; height: 14px; }
+
+/* Horus's line-art logo reads as a faint scribble at the plain 14px icon
+   size (built for simple single-stroke Lucide glyphs) — give it more room. */
+.hc-resource-open-btn--horus svg { width: 20px; height: 20px; }
+
+/* #22 — a flex row for quick-open/Horus button pairs sitting inside a list
+   row (next to the due-date column), so they're guaranteed side by side
+   instead of stacking as block children of a text column. */
+.hc-row-icon-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
 
 .hc-resource-class-chip {
   font-size: 11px;
@@ -3041,3 +3099,4 @@ body.hc-eink .hc-resource-source-icon {
   color: var(--text-muted);
   margin-top: 2px;
 }
+

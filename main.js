@@ -10,6 +10,8 @@ const {
   Notice,
   Menu,
   setIcon,
+  addIcon,
+  MarkdownRenderer,
   FuzzySuggestModal,
   Platform,
 } = require('obsidian');
@@ -23,6 +25,17 @@ const TODAY_VIEW_TYPE = 'hold-course-today';
 // courses), which are themselves the "along" axis's destination, never its
 // source. Used to decide when navigate() should set `origin` (see #14).
 const DETAIL_SCREENS = ['lecture', 'assignment', 'exam', 'resource'];
+
+// Horus (a separate, sibling plugin — github.com/fastermadman/horus) owns a
+// paginated reader view for .md notes. Opening a linked note there is a
+// cross-plugin call via Obsidian's own view-type registry, not a dependency
+// on Horus's code — it's a no-op if Horus isn't installed/enabled. Both the
+// view type and icon are copied verbatim from horus/main.js (HORUS_ICON_ID /
+// HORUS_ICON_SVG / VIEW_TYPE_HORUS_READER) so the button matches Horus's own
+// branding and works even if Horus loads after Hold Course does.
+const HORUS_READER_VIEW_TYPE = 'horus-reader-view';
+const HORUS_ICON_ID = 'horus-eye';
+const HORUS_ICON_SVG = '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" transform="translate(-34.0128 -172.8595) scale(2.019295)"><path stroke-width="1.8" d="m21.847 104.44-0.52917-0.38806q0.56444-0.74083 1.8344-2.0461t3.1044-2.7517q1.8344-1.4817 4.1275-2.7869 2.2931-1.3406 4.9389-2.1872t5.5386-0.84667q2.0814 0 4.1275 0.52917 2.0461 0.49389 3.9158 1.27 1.905 0.74083 3.4572 1.5522 1.5522 0.81139 2.6106 1.4817 1.0583 0.635 1.4111 0.88194 0.38806 0.24694 1.1289 0.74083 0.74083 0.45861 1.5875 0.98778 0.88194 0.52917 1.6228 0.98778 0.77611 0.45861 1.1642 0.67027l-0.35278 0.59973q-0.38806-0.21167-1.1289-0.67028-0.74083-0.45861-1.6228-0.98778t-1.6581-1.0231q-0.77611-0.49388-1.1994-0.77611-0.35278-0.24694-1.3758-0.88194-0.98778-0.635-2.5047-1.4111-1.4817-0.77611-3.3161-1.5169-1.8344-0.74083-3.8453-1.2347t-4.0217-0.49389q-2.7869 0-5.3975 0.84667-2.5753 0.81139-4.7978 2.0814-2.2225 1.27-4.0217 2.7164-1.7639 1.4464-2.9986 2.7164-1.2347 1.2347-1.7992 1.9403zm18.239 22.86q-0.14111-1.6228-0.56444-3.5278-0.38806-1.905-0.98778-3.7394-0.56444-1.8344-1.27-3.2808-0.67028-1.4464-1.4464-2.152v-1.023q2.2225-0.45861 3.0692-1.4111 0.52917-0.59972 0.70556-1.4817 0.17639-0.88195 0.24694-2.0814-1.4464-0.14111-3.3514-0.45861t-3.9511-0.70556q-2.0108-0.42333-3.8453-0.81139-1.7992-0.38806-3.0692-0.67028-1.27-0.3175-1.6228-0.42333-0.56444 0.45861-0.98778 0.88194-0.42333 0.38806-0.59972 0.56445l-0.49389-0.49389q1.5169-1.517 3.6689-3.1397 2.1872-1.658 4.7272-3.0692 2.54-1.4464 5.2211-2.3283 2.7164-0.88194 5.3269-0.88194 3.3161 0 6.0325 0.9525 2.7517 0.91722 5.0094 2.2931 2.2931 1.3758 4.1981 2.6811 1.5522 1.0583 2.9281 1.905 1.3758 0.81139 2.5753 1.0583l-0.14111 0.70556q-0.84667-0.17639-1.7286-0.59973-0.84667-0.45861-1.8344-1.0583-0.21167 0.0706-1.4111 0.42333-1.1642 0.3175-2.9281 0.77612-1.7286 0.45861-3.7394 0.9525t-3.9511 0.88194q-1.905 0.35278-3.3867 0.52917l12.277 16.334q0.45861 0.635 1.1289 1.1642 0.70556 0.56444 1.7286 0.56444 1.1994 0 2.1167-0.77611 0.91722-0.74083 0.91722-2.0461 0-1.0583-0.70556-1.9403-0.67028-0.88195-1.8344-0.88195-1.0936 0-1.6933 0.74084-0.59972 0.74083-0.74083 1.4464l-0.67028-0.10583q0.10583-0.59973 0.45861-1.27 0.38806-0.635 1.0231-1.0936 0.67028-0.42333 1.6228-0.42333 1.4464 0 2.3283 1.0936 0.91722 1.0936 0.91722 2.4342 0 1.6228-1.1289 2.54-1.1289 0.9525-2.6106 0.9525-1.3053 0-2.1167-0.635-0.77611-0.635-1.3406-1.3406l-12.488-16.686h-0.03528v18.662zm0.74083-19.403q1.4111 0 2.54-0.67028 1.1289-0.70555 1.7992-1.8344 0.70556-1.1289 0.70556-2.5047 0-1.4111-0.70556-2.54-0.67028-1.1289-1.7992-1.7992-1.1289-0.70556-2.54-0.70556-1.3758 0-2.54 0.70556-1.1289 0.67028-1.8344 1.7992-0.67028 1.1289-0.67028 2.54 0 1.3758 0.67028 2.5047 0.70556 1.1289 1.8344 1.8344 1.1642 0.67028 2.54 0.67028zm3.1044-0.21167q1.7639-0.28222 3.81-0.74083 2.0814-0.45861 4.0217-0.9525 1.9403-0.52917 3.3867-0.91722 1.4464-0.42334 2.0108-0.56445l-1.4464-0.9525q-1.5522-1.0936-3.3867-2.2225-1.7992-1.1289-3.9158-2.0108-2.1167-0.91722-4.6214-1.3053 1.2347 0.74083 1.9756 2.0461 0.77611 1.27 0.77611 2.8222 0 1.517-0.74083 2.787-0.70556 1.2347-1.8697 2.0108zm-6.2794-0.0353q-1.1289-0.77612-1.8344-2.0108-0.70556-1.27-0.70556-2.7517 0-1.5169 0.70556-2.7517 0.70556-1.27 1.8697-2.0108-2.6458 0.52917-5.1153 1.7286-2.4694 1.1994-4.5156 2.6106-2.0108 1.3758-3.3867 2.5047 0.49389 0.14111 1.8697 0.45861 1.4111 0.3175 3.3161 0.74084 1.905 0.42333 3.9511 0.81139 2.0461 0.38805 3.8453 0.67028zm3.0692 18.979h0.21167v-17.992h-0.38806q-0.07056 1.3758-0.24694 2.3283-0.17639 0.91722-0.74083 1.5875-0.42333 0.45861-1.1642 0.84667-0.70556 0.38805-1.8344 0.635v0.24694q0.74083 0.70556 1.4111 2.1167t1.2347 3.175 0.9525 3.5983q0.42333 1.8697 0.56444 3.4572z"/></g>';
 
 const COLOR_PALETTE = [
   { name: 'amber',  accent: '#BA7517', accentDark: '#E5A34F', light: '#FAC775', bg: '#FAEEDA', text: '#633806' },
@@ -125,6 +138,110 @@ const CLASS_STATUSES = ['ongoing', 'completed', 'dropped'];
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+// #5b: helpers for "file is truth" resource notes — the note body lives in a
+// vault markdown file Hold Course owns, not in data.json. Kept as pure
+// functions so the parsing/formatting is unit-testable without the app.
+
+// Split a leading `--- ... ---` YAML block off the rest of a note. Returns the
+// block verbatim (trailing newline included, or '') plus the body after it.
+function splitFrontmatter(text) {
+  const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(text || '');
+  if (!m) return { frontmatter: '', body: text || '' };
+  return { frontmatter: m[0], body: (text || '').slice(m[0].length) };
+}
+
+// Make a resource title safe as a filename: drop the characters Obsidian and
+// the common filesystems reject, collapse whitespace, cap the length.
+function sanitizeNoteFilename(name) {
+  const clean = String(name || '')
+    .replace(/[\\/:*?"<>|#^[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100)
+    .trim();
+  return clean || 'Untitled';
+}
+
+// The initial contents of an auto-created note stub: hc_* frontmatter that
+// ties the file back to its item (id survives a rename/move), an optional
+// wikilink to the source material, then any migrated data.json notes text.
+// idKey picks which kind of item owns the file — resources and (#5b Del B)
+// lectures use the same stub shape, only the id field differs.
+function buildNoteStub(item, classCode, sourceLink, idKey = 'hc_resource_id') {
+  const q = (v) => JSON.stringify(String(v));
+  const fm = ['---', `${idKey}: ${q(item.id)}`, `hc_title: ${q(item.title || '')}`];
+  if (item.author) fm.push(`hc_author: ${q(item.author)}`);
+  if (item.type) fm.push(`hc_type: ${q(item.type)}`);
+  if (item.date) fm.push(`hc_date: ${q(item.date)}`);
+  if (classCode) fm.push(`hc_class: ${q(classCode)}`);
+  fm.push('---', '');
+  let out = fm.join('\n') + '\n';
+  if (sourceLink) out += `Kilde: [[${sourceLink.replace(/\.md$/, '')}]]\n\n`;
+  const body = (item.notes || '').trim();
+  if (body) out += body + '\n';
+  return out;
+}
+
+// #5b Del B: base folder for auto-created note files; each kind (resources,
+// lectures) gets its own subfolder underneath — see _createNoteStub.
+const DEFAULT_NOTES_FOLDER = 'HoldCourse/Notes';
+
+// #5b Del A: which resource fields mirror into the note stub's frontmatter.
+// hc_-prefixed so they never collide with a bare `title`/`type` — VIAstudyWiz'
+// material notes use `type:` in a different taxonomy, and resources have no
+// sync path to author/type, so nothing upstream fights us for these keys.
+const RESOURCE_FM_FIELDS = { title: 'hc_title', author: 'hc_author', type: 'hc_type' };
+
+// Write side: merge the resource's fields into a frontmatter object in place.
+// Guarded to our own stubs (hc_resource_id match). Only non-empty values are
+// written; an emptied Hold Course field never deletes a key that's already
+// there (it may exist for the user's own Dataview queries). Returns whether
+// anything changed.
+function mergeResourceFrontmatter(fm, resource) {
+  if (!fm || fm.hc_resource_id !== resource.id) return false;
+  let changed = false;
+  for (const [field, key] of Object.entries(RESOURCE_FM_FIELDS)) {
+    const val = String(resource[field] || '').trim();
+    if (val && fm[key] !== val) { fm[key] = val; changed = true; }
+  }
+  return changed;
+}
+
+// Read side: pull hc_* frontmatter values back onto the resource — once a stub
+// exists, its frontmatter is the source of truth for these fields and the JSON
+// is a read-through cache. Same ownership guard. Returns whether anything
+// changed.
+function applyFrontmatterToResource(fm, resource) {
+  if (!fm || fm.hc_resource_id !== resource.id) return false;
+  let changed = false;
+  for (const [field, key] of Object.entries(RESOURCE_FM_FIELDS)) {
+    const v = fm[key];
+    if (typeof v === 'string' && v.trim() && v !== resource[field]) {
+      resource[field] = v;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Write side wrapper: merge the resource's current fields into its linked stub
+// via the native frontmatter API (no hand-rolled YAML). Silent no-op if there
+// is no linked file or it isn't one of ours — the JSON write already happened,
+// this is the mirror. #5b Del A.
+async function writeResourceFrontmatter(app, resource) {
+  const path = resource.notesLink;
+  if (!path) return;
+  const file = app.vault.getAbstractFileByPath(path);
+  if (!file) return;
+  try {
+    await app.fileManager.processFrontMatter(file, (fm) => {
+      mergeResourceFrontmatter(fm, resource);
+    });
+  } catch (e) {
+    // file vanished or is read-only — the resource JSON still saved fine
+  }
 }
 
 // A semester's position on the timeline. null means it has none at all — no
@@ -285,7 +402,7 @@ function getAllAssignments(semester) {
 // (obsidian.d.ts has no reindex/reconcile method), so it's wrapped in a
 // try/catch: if a future Obsidian version removes or renames it, this
 // falls through to the full-reload path below instead of throwing.
-async function openVaultNote(app, path) {
+async function resolveVaultFile(app, path) {
   let file = app.vault.getAbstractFileByPath(path);
   if (!file && await app.vault.adapter.exists(path)) {
     try {
@@ -295,13 +412,32 @@ async function openVaultNote(app, path) {
       // private API — fall through to the reload path below
     }
   }
-  if (file) {
-    app.workspace.openLinkText(path, '', false);
-  } else if (await app.vault.adapter.exists(path)) {
+  if (file) return file;
+  if (await app.vault.adapter.exists(path)) {
     new ConfirmReloadModal(app).open();
   } else {
     new Notice('Note not found in vault.');
   }
+  return null;
+}
+
+async function openVaultNote(app, path) {
+  const file = await resolveVaultFile(app, path);
+  if (file) app.workspace.openLinkText(path, '', false);
+}
+
+// Opens `path` in Horus's reader view (a new tab) instead of the default
+// markdown editor. Same file-resolution dance as openVaultNote — see
+// resolveVaultFile above — then a plain cross-plugin setViewState instead of
+// openLinkText. If Horus isn't installed/enabled, Obsidian just doesn't know
+// the view type and the tab renders empty; there's no clean way to detect
+// that upfront without importing Horus's code, so this stays a no-frills
+// best-effort call rather than adding a "is Horus installed" check. #22.
+async function openInHorus(app, path) {
+  const file = await resolveVaultFile(app, path);
+  if (!file) return;
+  const leaf = app.workspace.getLeaf('tab');
+  await leaf.setViewState({ type: HORUS_READER_VIEW_TYPE, active: true, state: { filePath: file.path } });
 }
 
 function getNextAssignmentDue(cls) {
@@ -784,12 +920,34 @@ function getCalItemStyle(item) {
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
+// #10: coerce a loaded device-settings blob into a complete object so
+// callers never hit undefined, whatever shape the file (or a legacy inline
+// block) was in. `null`/garbage → all defaults.
+function normalizeSettings(obj, defaultScale) {
+  const s = obj && typeof obj === 'object' ? obj : {};
+  return {
+    einkMode: s.einkMode === true,
+    mobileScale: typeof s.mobileScale === 'number' ? s.mobileScale : defaultScale,
+  };
+}
+
 class HoldCoursePlugin extends Plugin {
   async onload() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
     const defaultScale = Platform.isMobile ? 1.1 : 1.0;
-    this.data.settings = this.data.settings || { einkMode: false, mobileScale: defaultScale };
-    if (this.data.settings.mobileScale === undefined) this.data.settings.mobileScale = defaultScale;
+
+    // #10: device-local settings (grayscale mode, view scale) persist to
+    // their own file, not inside data.json. That way viastudywiz's content
+    // sync can rewrite data.json wholesale without clobbering per-device
+    // prefs, and this plugin writing prefs can't clobber synced content.
+    // Migrate a legacy inline `settings` block out on first load; the
+    // migration save below then strips the now-dead key from data.json.
+    const inlineSettings = this.data.settings;
+    delete this.data.settings;
+    const diskSettings = await this._loadSettingsFile();
+    this.settings = normalizeSettings(diskSettings || inlineSettings, defaultScale);
+    if (!diskSettings && inlineSettings) await this.saveSettings();
+
     this.applyEinkClass();
     this.applyMobileScale();
 
@@ -799,10 +957,15 @@ class HoldCoursePlugin extends Plugin {
     // directly rather than save() — no views exist yet at this point.
     let changed = this._migrateSemesters();
     if (this._migrateDataVersion()) changed = true;
+    if (inlineSettings) changed = true; // drop the moved-out `settings` key
     if (changed) await this.saveData(this.data);
 
     this.registerView(VIEW_TYPE, (leaf) => new HoldCourseView(leaf, this));
     this.registerView(TODAY_VIEW_TYPE, (leaf) => new HoldCourseTodayView(leaf, this));
+    // Registered here too (not just by Horus itself) so the "Open in Horus"
+    // button's icon renders correctly regardless of plugin load order.
+    // addIcon() is idempotent — re-registering the same id is harmless. #22.
+    addIcon(HORUS_ICON_ID, HORUS_ICON_SVG);
 
     this.addRibbonIcon('graduation-cap', 'Hold Course', () => this.activateView());
     this.addRibbonIcon('calendar-clock', 'Hold Course — Today', () => this.activateTodayView());
@@ -927,12 +1090,12 @@ class HoldCoursePlugin extends Plugin {
   }
 
   applyEinkClass() {
-    einkActive = this.data.settings.einkMode;
+    einkActive = this.settings.einkMode;
     document.body.classList.toggle('hc-eink', einkActive);
   }
 
   applyMobileScale() {
-    document.body.style.setProperty('--hc-mobile-scale', this.data.settings.mobileScale);
+    document.body.style.setProperty('--hc-mobile-scale', this.settings.mobileScale);
   }
 
   refreshAllViews() {
@@ -960,6 +1123,7 @@ class HoldCoursePlugin extends Plugin {
   // 2026-08-30 — see issue #2)
   async onExternalSettingsChange() {
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
+    delete this.data.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
     this.refreshTodayView();
     this.refreshMainView();
   }
@@ -1014,6 +1178,36 @@ class HoldCoursePlugin extends Plugin {
   async save() {
     await this.saveData(this.data);
     this.refreshTodayView();
+  }
+
+  // #10: device-local settings live beside data.json in their own file.
+  // loadData()/saveData() only ever touch data.json, so these go through
+  // the vault adapter directly. Read/parse failures fall back to null so
+  // onload can apply defaults rather than crash on a hand-mangled file.
+  _settingsFilePath() {
+    return `${this.manifest.dir}/device-settings.json`;
+  }
+
+  async _loadSettingsFile() {
+    try {
+      const path = this._settingsFilePath();
+      if (!(await this.app.vault.adapter.exists(path))) return null;
+      return JSON.parse(await this.app.vault.adapter.read(path));
+    } catch (e) {
+      console.error('Hold Course: could not read device-settings.json', e);
+      return null;
+    }
+  }
+
+  async saveSettings() {
+    try {
+      await this.app.vault.adapter.write(
+        this._settingsFilePath(),
+        JSON.stringify(this.settings, null, 2),
+      );
+    } catch (e) {
+      console.error('Hold Course: could not write device-settings.json', e);
+    }
   }
 
   // ─── Semester helpers ──────────────────────────────────────────────────────
@@ -1483,12 +1677,12 @@ class HoldCourseSettingTab extends PluginSettingTab {
       .setName('Grayscale display mode')
       .setDesc('Increases text contrast and size, and swaps class/type colors for a true grayscale palette. For e-ink displays (e.g. Boox tablets), where low-contrast text can wash out under fast refresh — also useful if you run your phone or tablet in grayscale for fewer distractions.')
       .addToggle((toggle) => toggle
-        .setValue(this.plugin.data.settings.einkMode)
+        .setValue(this.plugin.settings.einkMode)
         .onChange(async (value) => {
-          this.plugin.data.settings.einkMode = value;
+          this.plugin.settings.einkMode = value;
           this.plugin.applyEinkClass();
           this.plugin.refreshAllViews();
-          await this.plugin.save();
+          await this.plugin.saveSettings();
         }));
 
     const scaleSetting = new Setting(containerEl)
@@ -1498,19 +1692,46 @@ class HoldCourseSettingTab extends PluginSettingTab {
     const minusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '−' });
     const label = scaleSetting.controlEl.createSpan({
       cls: 'hc-settings-scale-label',
-      text: `${Math.round(this.plugin.data.settings.mobileScale * 100)}%`,
+      text: `${Math.round(this.plugin.settings.mobileScale * 100)}%`,
     });
     const plusBtn = scaleSetting.controlEl.createEl('button', { cls: 'clickable-icon', text: '+' });
 
     const step = async (delta) => {
-      const next = Math.min(1.5, Math.max(0.9, Math.round((this.plugin.data.settings.mobileScale + delta) * 10) / 10));
-      this.plugin.data.settings.mobileScale = next;
+      const next = Math.min(1.5, Math.max(0.9, Math.round((this.plugin.settings.mobileScale + delta) * 10) / 10));
+      this.plugin.settings.mobileScale = next;
       this.plugin.applyMobileScale();
-      await this.plugin.save();
+      await this.plugin.saveSettings();
       label.setText(`${Math.round(next * 100)}%`);
     };
     minusBtn.addEventListener('click', () => step(-0.1));
     plusBtn.addEventListener('click', () => step(0.1));
+
+    // #5b: opt-in. Off (default) keeps every resource note in data.json as a
+    // plain string. On, a resource's notes live in a vault markdown file Hold
+    // Course creates and owns — edit it here or in Obsidian, the file wins.
+    // Stored in data.json (not device-settings.json): the note files sync
+    // between devices, so this decision has to travel with them.
+    new Setting(containerEl)
+      .setName('Notes as vault files')
+      .setDesc('Store each reading\'s and lecture\'s notes in their own markdown file instead of inside the plugin\'s data. The file is the source of truth; existing notes are moved into it the first time you edit. Hold Course only ever writes files it created itself.')
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.data.fileIsTruth === true)
+        .onChange(async (value) => {
+          this.plugin.data.fileIsTruth = value;
+          await this.plugin.save();
+          this.plugin.refreshAllViews();
+        }));
+
+    new Setting(containerEl)
+      .setName('Notes folder')
+      .setDesc('Where auto-created note files go, relative to the vault root — a Readings/ subfolder for resource notes and a Lectures/ subfolder for lecture notes are created under it.')
+      .addText((text) => text
+        .setPlaceholder(DEFAULT_NOTES_FOLDER)
+        .setValue(this.plugin.data.notesFolder || '')
+        .onChange(async (value) => {
+          this.plugin.data.notesFolder = value.trim();
+          await this.plugin.save();
+        }));
   }
 }
 
@@ -2903,6 +3124,17 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
+    // Quick-open button for the linked note — same icon-button pattern as
+    // the lecture ROW's one-click open, so it's available up here too
+    // instead of only down in the Lecture Notes section below. No Horus
+    // button here: Horus is for opening books (Readings), and a lecture's
+    // linked note isn't one. #22.
+    if ((lec.vaultLink || '').trim()) {
+      const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', () => openVaultNote(this.app, lec.vaultLink));
+    }
+
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
     const deleteIcon = deleteBtn.createSpan({ cls: 'hc-btn-icon' });
     setIcon(deleteIcon, 'trash-2');
@@ -2914,15 +3146,20 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
+    // #5b Del B / viastudywiz#172: the teachers' `beskrivelse:` used to be
+    // written into lec.notes, which mixed their text with Valdemar's own and
+    // meant an emptied notes field got refilled on the next sync. It now has
+    // its own sync-owned field, shown read-only — the sync owns description,
+    // Valdemar owns notes, and neither clobbers the other.
+    if ((lec.description || '').trim()) {
+      content.createDiv({ cls: 'hc-lecture-section-label', text: 'Lesson Description' });
+      const desc = content.createDiv('hc-lecture-description');
+      MarkdownRenderer.render(this.app, lec.description, desc, lec.vaultLink || '', this);
+    }
+
     // Notes section
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Key Concepts & Lesson Goal' });
-    const textarea = content.createEl('textarea', { cls: 'hc-lecture-notes' });
-    textarea.value = lec.notes || '';
-    textarea.placeholder = 'Add notes, key concepts, or lesson goals…';
-    textarea.addEventListener('blur', () => {
-      lec.notes = textarea.value;
-      this.plugin.save();
-    });
+    this._renderLectureNote(content, lec, cls);
 
     // Vault link section
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Lecture Notes' });
@@ -3049,6 +3286,31 @@ class HoldCourseView extends ItemView {
       const aInfo = aRow.createDiv('hc-lecture-assign-info');
       aInfo.createDiv({ cls: 'hc-lecture-assign-title', text: a.title });
       if (a.status) aInfo.createDiv({ cls: 'hc-lecture-assign-status', text: a.status });
+
+      // #22 — quick-open pair, its own flex row (not inside aInfo, which
+      // stacks its children as block text) so the two buttons sit side by
+      // side instead of on top of each other, next to the due-date column.
+      // Horus only for Readings (the assignment type that's actually a
+      // book) — see _renderReadingRow for the same rule.
+      if ((a.linkedNote || '').trim()) {
+        const iconActions = aRow.createDiv('hc-row-icon-actions');
+        const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+        setIcon(openBtn, 'external-link');
+        openBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          openVaultNote(this.app, a.linkedNote);
+        });
+
+        if (a.type === 'Reading') {
+          const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+          setIcon(horusBtn, HORUS_ICON_ID);
+          horusBtn.addEventListener('click', (evt) => {
+            evt.stopPropagation();
+            openInHorus(this.app, a.linkedNote);
+          });
+        }
+      }
+
       if (a.dueDate) {
         const info = getDueInfo(a.dueDate);
         const dueEl = aRow.createDiv('hc-lecture-assign-due');
@@ -3353,13 +3615,27 @@ class HoldCourseView extends ItemView {
     // Linked-note flag — same silent-when-absent treatment as the Lectures
     // tab's own vaultLink flag: nothing rendered when there's no linked
     // note, a quiet label when there is. #9 (LiveAQuietLife, 2026-09-01)
+    //
+    // #22 — the quick-open/Horus buttons are their own flex sibling (not
+    // inside `mid`, which stacks its children as block text) so they sit
+    // side by side next to the due-date column instead of on top of each
+    // other. Every Reading here is a book, so Horus always applies.
     if ((assignment.linkedNote || '').trim()) {
       mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
-      const openBtn = mid.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+
+      const iconActions = row.createDiv('hc-row-icon-actions');
+      const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
         openVaultNote(this.app, assignment.linkedNote);
+      });
+
+      const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, assignment.linkedNote);
       });
     }
 
@@ -3488,6 +3764,22 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
+    // Quick-open button for the linked note (#22). Horus is only offered on
+    // Readings — that's the assignment type that's actually a book, so it's
+    // the one Horus (a book reader) makes sense for; to start with, at
+    // least (easy to widen to Writing too if that turns out to want it).
+    if ((assignment.linkedNote || '').trim()) {
+      const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', () => openVaultNote(this.app, assignment.linkedNote));
+
+      if (assignment.type === 'Reading') {
+        const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+        setIcon(horusBtn, HORUS_ICON_ID);
+        horusBtn.addEventListener('click', () => openInHorus(this.app, assignment.linkedNote));
+      }
+    }
+
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
     const deleteIcon = deleteBtn.createSpan({ cls: 'hc-btn-icon' });
     setIcon(deleteIcon, 'trash-2');
@@ -3557,6 +3849,10 @@ class HoldCourseView extends ItemView {
             const openBtn = bookActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
             setIcon(openBtn, 'external-link');
             openBtn.addEventListener('click', () => openVaultNote(this.app, res.vaultLink));
+
+            const horusBtn = bookActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+            setIcon(horusBtn, HORUS_ICON_ID);
+            horusBtn.addEventListener('click', () => openInHorus(this.app, res.vaultLink));
           }
           const changeBtn = bookActions.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Change' });
           changeBtn.addEventListener('click', () => {
@@ -4004,6 +4300,8 @@ class HoldCourseView extends ItemView {
     const resource = this.plugin.findResource(sem.id, this.currentResourceId);
     if (!resource) { this.currentTab = 'Library'; this.navigate('class', cls.id); return; }
 
+    this._syncResourceFromNoteFrontmatter(resource);
+
     const color = getColor(cls.colorIndex);
 
     // Back button: rendered once, uniformly, by _renderSubheader. No
@@ -4039,6 +4337,18 @@ class HoldCourseView extends ItemView {
         this.render();
       }).open();
     });
+
+    // Quick-open buttons for the vault link (#22 — same pair as Lecture detail;
+    // this is the plugin's "book" entity, so Horus is the obvious fit here).
+    if ((resource.vaultLink || '').trim()) {
+      const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
+      setIcon(openBtn, 'external-link');
+      openBtn.addEventListener('click', () => openVaultNote(this.app, resource.vaultLink));
+
+      const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', () => openInHorus(this.app, resource.vaultLink));
+    }
 
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
     const deleteIcon = deleteBtn.createSpan({ cls: 'hc-btn-icon' });
@@ -4162,13 +4472,257 @@ class HoldCourseView extends ItemView {
 
     // Notes
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Notes' });
-    const textarea = content.createEl('textarea', { cls: 'hc-lecture-notes' });
-    textarea.value = resource.notes || '';
-    textarea.placeholder = 'Add notes…';
-    textarea.addEventListener('blur', () => {
-      resource.notes = textarea.value;
-      this.plugin.save();
+    this._renderResourceNote(content, resource, sem);
+  }
+
+  // #5a: show a note field as rendered Markdown; click it (or its empty-state
+  // placeholder) to drop into a raw textarea, blur to save and re-render.
+  // Reads/writes obj[key] in place — same contract as the plain textarea it
+  // replaces, so callers still just this.plugin.save() nothing extra.
+  _renderClickToEditNote(container, obj, key, placeholder) {
+    const wrap = container.createDiv('hc-note-edit');
+    // The mouse-up that blurs the textarea also fires a `click`, and it
+    // usually lands on the fresh preview box sitting in the same spot —
+    // without this guard the field bounces straight back into edit mode and
+    // never appears rendered until the screen is re-navigated. Armed on
+    // blur, consumed by that trailing click; the setTimeout clears it for
+    // the case where the click landed elsewhere (button, Tab-away), which
+    // runs after the trailing click in the same UI-event turn.
+    let swallowNextClick = false;
+
+    const showEditor = () => {
+      wrap.empty();
+      const ta = wrap.createEl('textarea', { cls: 'hc-lecture-notes' });
+      ta.value = obj[key] || '';
+      ta.placeholder = placeholder;
+      ta.addEventListener('blur', () => {
+        obj[key] = ta.value;
+        this.plugin.save();
+        swallowNextClick = true;
+        setTimeout(() => { swallowNextClick = false; }, 0);
+        showPreview();
+      });
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    };
+
+    const showPreview = () => {
+      wrap.empty();
+      const val = obj[key] || '';
+      const preview = wrap.createDiv({
+        cls: val.trim() ? 'hc-note-preview' : 'hc-note-preview hc-note-preview--empty',
+        attr: { 'aria-label': 'Click to edit notes' },
+      });
+      if (val.trim()) {
+        MarkdownRenderer.render(this.app, val, preview, '', this);
+      } else {
+        preview.setText(placeholder);
+      }
+      preview.addEventListener('click', (evt) => {
+        if (swallowNextClick) { swallowNextClick = false; return; }
+        // Let clicks on rendered links/checkboxes act normally instead of
+        // yanking the reader into edit mode.
+        if (evt.target.closest('a, input')) return;
+        showEditor();
+      });
+    };
+
+    showPreview();
+  }
+
+  // #5b: resource Notes when "file is truth" is on. The body lives in a vault
+  // markdown file Hold Course auto-creates and owns (hc_* frontmatter); this
+  // reads it on open and writes it back on blur — no vault-modify watcher, so
+  // it stays loop-safe by construction. Legacy mode (notes as a data.json
+  // string) falls straight through to _renderClickToEditNote unchanged.
+  //
+  // ponytail: this parallels _renderClickToEditNote's editor/preview/
+  // swallow-click dance rather than sharing it — that helper is on the working
+  // #5a path for lectures/assignments/exams. #5b session 2 moves those onto
+  // file-backed notes too; unify the two then, not now.
+  _renderResourceNote(container, resource, sem) {
+    if (this.plugin.data.fileIsTruth !== true) {
+      this._renderClickToEditNote(container, resource, 'notes', 'Add notes…');
+      return;
+    }
+    const cls = (sem.classes || []).find(c => (resource.classIds || []).includes(c.id));
+    this._renderFileNote(container, resource, {
+      idKey: 'hc_resource_id',
+      subfolder: 'Readings',
+      classCode: cls ? cls.code : '',
+      sourceLink: resource.vaultLink || '',
+      filename: resource.title,
+      placeholder: 'Add notes…',
     });
+  }
+
+  // #5b Del B: lecture notes on the same file model. lec.vaultLink stays the
+  // sync-owned [NOTE] stub (it carries the preparation checkboxes), so it is
+  // the source link here, exactly like a resource's material note. The
+  // teacher's text no longer lives in lec.notes at all — viastudywiz#172 moved
+  // it to the sync-owned lec.description, rendered read-only above this.
+  _renderLectureNote(container, lec, cls) {
+    if (this.plugin.data.fileIsTruth !== true) {
+      const textarea = container.createEl('textarea', { cls: 'hc-lecture-notes' });
+      textarea.value = lec.notes || '';
+      textarea.placeholder = 'Add notes, key concepts, or lesson goals…';
+      textarea.addEventListener('blur', () => {
+        lec.notes = textarea.value;
+        this.plugin.save();
+      });
+      return;
+    }
+    this._renderFileNote(container, lec, {
+      idKey: 'hc_lecture_id',
+      subfolder: 'Lectures',
+      classCode: cls ? cls.code : '',
+      sourceLink: lec.vaultLink || '',
+      filename: lec.date ? `${lec.date} ${lec.title}` : lec.title,
+      placeholder: 'Add notes, key concepts, or lesson goals…',
+    });
+  }
+
+  // The shared file-backed note widget. `spec` says which frontmatter id key
+  // owns the file, what to seed a new stub with, and what the empty state
+  // reads — everything else is identical for resources and lectures.
+  _renderFileNote(container, item, spec) {
+    const wrap = container.createDiv('hc-note-edit');
+    let swallowNextClick = false;
+    const armSwallow = () => {
+      swallowNextClick = true;
+      setTimeout(() => { swallowNextClick = false; }, 0);
+    };
+
+    const showEditor = (file, body) => {
+      wrap.empty();
+      const ta = wrap.createEl('textarea', { cls: 'hc-lecture-notes' });
+      ta.value = body;
+      ta.placeholder = spec.placeholder;
+      ta.addEventListener('blur', async () => {
+        armSwallow();
+        await this._writeNoteBody(file, ta.value);
+        render();
+      });
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    };
+
+    const render = async () => {
+      wrap.empty();
+      const file = await this._resolveNoteFile(item.notesLink || '');
+
+      // No file yet: click the placeholder to create the stub and drop into it.
+      if (!file) {
+        const preview = wrap.createDiv({
+          cls: 'hc-note-preview hc-note-preview--empty',
+          attr: { 'aria-label': 'Click to create a note file' },
+        });
+        preview.setText(spec.placeholder);
+        preview.addEventListener('click', async () => {
+          if (swallowNextClick) { swallowNextClick = false; return; }
+          await this._createNoteStub(item, spec);
+          render();
+        });
+        return;
+      }
+
+      let raw = '';
+      try { raw = await this.app.vault.read(file); } catch (e) { raw = ''; }
+      const body = splitFrontmatter(raw).body.trim();
+      const owned = this._ownsNoteFile(file, item, spec.idKey);
+
+      const preview = wrap.createDiv({
+        cls: body ? 'hc-note-preview' : 'hc-note-preview hc-note-preview--empty',
+        attr: { 'aria-label': owned ? 'Click to edit notes' : 'Open in Obsidian to edit' },
+      });
+      if (body) {
+        MarkdownRenderer.render(this.app, body, preview, item.notesLink, this);
+      } else {
+        preview.setText(spec.placeholder);
+      }
+
+      // Idempotency rule: Hold Course never writes a file it didn't create.
+      // A linked note without our hc_resource_id is read-only here.
+      if (!owned) {
+        wrap.createDiv({
+          cls: 'hc-note-foreign-hint',
+          text: 'Linked file not created by Hold Course — open it in Obsidian to edit.',
+        });
+        return;
+      }
+
+      preview.addEventListener('click', (evt) => {
+        if (swallowNextClick) { swallowNextClick = false; return; }
+        if (evt.target.closest('a, input')) return;
+        showEditor(file, body);
+      });
+    };
+
+    render();
+  }
+
+  // Same stale-index guard as openVaultNote: a just-synced file can be real on
+  // disk but missing from Obsidian's in-memory index. Returns the TFile or null.
+  async _resolveNoteFile(path) {
+    if (!path) return null;
+    let file = this.app.vault.getAbstractFileByPath(path);
+    if (!file && await this.app.vault.adapter.exists(path)) {
+      try {
+        await this.app.vault.adapter.reconcileFile(path, path, false);
+        file = this.app.vault.getAbstractFileByPath(path);
+      } catch (e) {
+        // private API — treat as not-yet-indexed
+      }
+    }
+    return file;
+  }
+
+  // ponytail: notesLink-path match is the session-1 truth (we're the only
+  // writer of that field). The frontmatter id check (idKey) is the
+  // rename/move-proof path for re-matching a file the user moved.
+  _ownsNoteFile(file, item, idKey = 'hc_resource_id') {
+    if (item.notesLink && file && item.notesLink === file.path) return true;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return !!fm && fm[idKey] === item.id;
+  }
+
+  // #5b Del A read path: when the resource screen opens, pull hc_* values from
+  // the linked stub's frontmatter onto the resource. Sync + best-effort — if
+  // the file isn't in Obsidian's index yet, the next open catches it. No vault
+  // watcher, so there's nothing reactive to loop on.
+  _syncResourceFromNoteFrontmatter(resource) {
+    if (this.plugin.data.fileIsTruth !== true || !resource.notesLink) return;
+    const file = this.app.vault.getAbstractFileByPath(resource.notesLink);
+    if (!file) return;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (applyFrontmatterToResource(fm, resource)) this.plugin.save();
+  }
+
+  // Replace the note body, leaving any frontmatter block untouched.
+  async _writeNoteBody(file, newBody) {
+    await this.app.vault.process(file, (data) => {
+      const fm = splitFrontmatter(data).frontmatter;
+      const head = fm ? fm.trimEnd() + '\n\n' : '';
+      return head + newBody.replace(/^\s*\n/, '').trimEnd() + '\n';
+    });
+  }
+
+  async _createNoteStub(item, spec) {
+    const root = (this.plugin.data.notesFolder || DEFAULT_NOTES_FOLDER).replace(/^\/+|\/+$/g, '');
+    const folder = root ? `${root}/${spec.subfolder}` : spec.subfolder;
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      try { await this.app.vault.createFolder(folder); } catch (e) { /* already there */ }
+    }
+    const base = sanitizeNoteFilename(spec.filename);
+    let path = `${folder}/${base}.md`;
+    for (let n = 2; await this.app.vault.adapter.exists(path); n++) {
+      path = `${folder}/${base} (${n}).md`;
+    }
+    await this.app.vault.create(path, buildNoteStub(item, spec.classCode, spec.sourceLink, spec.idKey));
+    item.notesLink = path;
+    item.notes = ''; // migrated into the file — file is truth now
+    await this.plugin.save();
+    return path;
   }
 
   // ─── Assignments (global) ─────────────────────────────────────────────────
@@ -7247,6 +7801,10 @@ class EditResourceModal extends Modal {
       vaultLink: this.formData.vaultLink.trim(),
       url: this.formData.url.trim(),
     });
+    // #5b Del A: mirror title/author/type into the linked stub's frontmatter.
+    if (this.plugin.data.fileIsTruth === true) {
+      writeResourceFrontmatter(this.app, this.resource);
+    }
     this.onSave();
     this.close();
   }
@@ -7477,6 +8035,12 @@ Object.assign(module.exports, {
   ConfirmReloadModal,
   getGlobalAssignments,
   HoldCourseView,
+  normalizeSettings,
+  splitFrontmatter,
+  sanitizeNoteFilename,
+  buildNoteStub,
+  mergeResourceFrontmatter,
+  applyFrontmatterToResource,
 });
 
 /* nosourcemap */

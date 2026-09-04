@@ -11,7 +11,12 @@
 # rundt i konflikt-filer den ikke kan afgøre. Boox skal have ægte
 # fil-indhold, derfor skal dette script køres før hver device-test.
 #
-# data.json røres ikke — Boox og Mac har med vilje hver sine indstillinger.
+# data.json røres ikke af dette script. Efter viastudywiz-extension#146 reconciler
+# sync_hold_course.py selv data.json'ens indhold (semesters, currentSemesterId) ind
+# i .obsidian-onyx. Siden #10 (device-settings.json, viastudywiz#171) er `settings`
+# (einkMode, mobileScale) slet ikke i data.json længere — den bor i sin egen fil,
+# som hverken dette script eller reconcilen rører. Dette script skal derfor stadig
+# holde fingrene væk fra data.json.
 #
 # manifest.json kopieres IKKE: repoets manifest har isDesktopOnly: true
 # (se issue #4, ikke løst i koden endnu), men enhedens kopi er patchet til
