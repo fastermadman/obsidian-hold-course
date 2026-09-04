@@ -4,22 +4,79 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { HoldCourseView } = require('./_bootstrap.js');
 
-// navigate()/back()/forward()/origin are pure view-instance state machines —
-// none of the paths under test touch this.plugin or the DOM, so both can be
-// stubbed to nothing. Callers that DO stub render() (most tests here) are
-// testing navigate()'s bookkeeping in isolation from rendering; the one test
-// that needs render() to actually run (the re-entrancy guard) says so.
+// navigate()/origin/getState()/setState() are pure view-instance state
+// machines — none of the paths under test touch this.plugin or the DOM, so
+// both can be stubbed to nothing. Callers that DO stub render() (most tests
+// here) are testing navigate()'s bookkeeping in isolation from rendering; the
+// one test that needs render() to actually run (the re-entrancy guard) says so.
 //
 // Not covered here on purpose: whether scrollTop actually ends up where it
-// should on screen. origin.scrollTop and _navigateToOrigin()'s restore both
-// read a real .hc-content element (_getScrollEl()), which _bootstrap.js
-// deliberately doesn't stub — see its own comment. That's an on-device check
-// (#33: "scrolled list → open row → back → same offset"), not a unit test.
+// should on screen. origin.scrollTop, _navigateToOrigin()'s restore and
+// setEphemeralState() all read a real .hc-content element (_getScrollEl()),
+// which _bootstrap.js deliberately doesn't stub — see its own comment. That's
+// an on-device check (#33: "scrolled list → open row → back → same offset"),
+// not a unit test.
+
+// Stands in for the WorkspaceLeaf that owns the view. Mirrors Obsidian
+// 1.13.1's real semantics (read out of its app.js for #35) — the parts this
+// plugin depends on and would silently lose if they ever changed:
+//   - recordHistory() drops entries for a view with navigation !== true,
+//     and dedups against the top entry by JSON.stringify of its state
+//   - pushState() clears forwardHistory
+//   - go() walks the two stacks around a CURRENT state that is not itself
+//     an entry — it's read live off the view via getState()
+//   - the state handed back arrives through setState(), and the ephemeral
+//     state AFTER it
+function attachLeaf(view) {
+  const history = {
+    backHistory: [],
+    forwardHistory: [],
+    pushState(entry) {
+      this.backHistory.push(entry);
+      this.forwardHistory = [];
+    },
+    go(n) {
+      const current = leaf.getHistoryState();
+      let cursor = current, popped;
+      while (n > 0 && (popped = this.forwardHistory.pop())) { this.backHistory.push(cursor); cursor = popped; n--; }
+      while (n < 0 && (popped = this.backHistory.pop())) { this.forwardHistory.push(cursor); cursor = popped; n++; }
+      if (cursor === current) return;
+      leaf.setViewState({ ...cursor.state, popstate: true }, cursor.eState);
+    },
+    back() { this.go(-1); },
+    forward() { this.go(1); },
+  };
+  const leaf = {
+    history,
+    getViewState() { return { type: 'hold-course', state: view.getState() }; },
+    getHistoryState() {
+      return { title: 'Hold Course', icon: 'graduation-cap', state: leaf.getViewState(), eState: view.getEphemeralState() };
+    },
+    recordHistory(entry) {
+      if (!view.navigation) return;
+      const top = history.backHistory[history.backHistory.length - 1];
+      if (top && JSON.stringify(top.state) === JSON.stringify(entry.state)) return;
+      history.pushState(entry);
+    },
+    setViewState(viewState, eState) {
+      view.setState(viewState.state, { history: false, layout: false, close: false });
+      if (eState) view.setEphemeralState(eState);
+    },
+  };
+  view.leaf = leaf;
+  return leaf;
+}
+
 function makeView() {
   const view = new HoldCourseView(null, {});
   view.render = () => {};
+  attachLeaf(view);
   return view;
 }
+
+// Screens as the back stack records them: the entry holds the state of the
+// screen being LEFT, so a stack is read oldest-first.
+const screensIn = (leaf) => leaf.history.backHistory.map(e => e.state.state.screen);
 
 test('origin is set opening a detail screen from a list screen', () => {
   const view = makeView();
@@ -65,70 +122,86 @@ test('origin clears navigating to a list screen', () => {
   assert.equal(view.origin, null);
 });
 
-test('navigate() pushes a history entry per real navigation; an identical re-navigate is deduped', () => {
-  const view = makeView();
-  assert.equal(view.history.length, 0);
-
-  view.navigate('assignments');
-  assert.equal(view.history.length, 1);
-  assert.equal(view.histIndex, 0);
-
-  view.navigate('assignments'); // nothing actually changed
-  assert.equal(view.history.length, 1);
+test('navigation is on — it gates every native entry point (#35)', () => {
+  // Obsidian's header arrows, app:go-back/go-forward and the mobile swipe all
+  // check view.navigation, and recordHistory() drops entries without it. Turn
+  // this off and back/forward goes silently dead, with nothing else breaking
+  // to point at the cause.
+  assert.equal(makeView().navigation, true);
 });
 
-test('back()/forward() round-trip; a fresh navigate() truncates the old forward branch', () => {
+test('navigate() records the screen it leaves; an identical re-navigate records nothing', () => {
   const view = makeView();
+  const leaf = view.leaf;
+  assert.deepEqual(screensIn(leaf), []);
 
-  view.navigate('assignments');                       // 0
-  view.navigate('assignment', 'c1', null, 'a1');       // 1
-  view.navigate('assignment', 'c1', null, 'a2');       // 2 — chevron
-  assert.equal(view.history.length, 3);
-  assert.equal(view.histIndex, 2);
+  view.navigate('assignments');
+  assert.deepEqual(screensIn(leaf), ['dashboard']);
 
-  view.back();
+  view.navigate('assignments'); // nothing actually changed
+  assert.deepEqual(screensIn(leaf), ['dashboard']);
+});
+
+test('back/forward round-trip through the leaf; a fresh navigate() truncates the old forward branch', () => {
+  const view = makeView();
+  const leaf = view.leaf;
+
+  view.navigate('assignments');
+  view.navigate('assignment', 'c1', null, 'a1');
+  view.navigate('assignment', 'c1', null, 'a2'); // chevron
+  assert.deepEqual(screensIn(leaf), ['dashboard', 'assignments', 'assignment']);
+
+  leaf.history.back();
   assert.equal(view.currentAssignmentId, 'a1');
-  assert.equal(view.histIndex, 1);
 
-  view.back();
+  leaf.history.back();
   assert.equal(view.screen, 'assignments');
-  assert.equal(view.histIndex, 0);
 
-  view.forward();
+  leaf.history.forward();
   assert.equal(view.currentAssignmentId, 'a1');
-  assert.equal(view.histIndex, 1);
 
   // Navigating from a "back"-ed-into state drops the abandoned a2 branch.
   view.navigate('assignment', 'c1', null, 'a3');
-  assert.equal(view.history.length, 3);
+  assert.deepEqual(leaf.history.forwardHistory, []);
   assert.equal(view.currentAssignmentId, 'a3');
 
-  view.forward(); // nothing beyond a3 anymore
+  leaf.history.forward(); // nothing beyond a3 anymore
   assert.equal(view.currentAssignmentId, 'a3');
 });
 
-test('back() past the start and forward() past the end are silent no-ops', () => {
+test('back past the start and forward past the end are silent no-ops', () => {
   const view = makeView();
   view.navigate('assignments');
-  view.back();
+  view.leaf.history.back();   // back to dashboard, the one real entry
+  view.leaf.history.back();   // nothing left
+  assert.equal(view.screen, 'dashboard');
+  view.leaf.history.forward();
   assert.equal(view.screen, 'assignments');
-  view.forward();
+  view.leaf.history.forward();
   assert.equal(view.screen, 'assignments');
 });
 
-test('navigateTab updates the current history entry in place and does not push', () => {
+test('navigateTab records nothing, but the tab travels with the next entry recorded', () => {
   const view = makeView();
+  const leaf = view.leaf;
   view.navigate('class', 'c1');
-  assert.equal(view.history.length, 1);
+  assert.deepEqual(screensIn(leaf), ['dashboard']);
 
   view.navigateTab('Exams');
-  assert.equal(view.history.length, 1);
-  assert.equal(view.history[0].tab, 'Exams');
+  assert.deepEqual(screensIn(leaf), ['dashboard'], 'a tab switch is not a navigation');
+  assert.equal(view.currentTab, 'Exams');
+
+  // Leaving the class is what records it — read live off getState(), so the
+  // tab comes back with it.
+  view.navigate('assignments');
+  leaf.history.back();
+  assert.equal(view.screen, 'class');
   assert.equal(view.currentTab, 'Exams');
 });
 
-test('a navigate() call made mid-render (a missing-data redirect) replaces the top entry instead of pushing', () => {
+test('a navigate() call made mid-render (a missing-data redirect) records no entry for the screen nobody saw', () => {
   const view = new HoldCourseView(null, {});
+  const leaf = attachLeaf(view);
   let redirected = false;
   // Simulates render()'s own _inRender guard around a renderer that calls
   // navigate() because the id it was given no longer resolves to anything.
@@ -142,10 +215,32 @@ test('a navigate() call made mid-render (a missing-data redirect) replaces the t
   };
 
   view.navigate('class', 'c1');
-  assert.equal(view.history.length, 1);
-
   view.navigate('lecture', 'c1', 'deleted-lecture-id');
-  assert.equal(view.history.length, 2, 'redirect must not add a third entry');
-  assert.equal(view.history[1].screen, 'class');
+
+  assert.deepEqual(screensIn(leaf), ['dashboard', 'class'],
+    'the dead lecture screen must never become a back target');
   assert.equal(view.screen, 'class');
+});
+
+test('getState()/setState() round-trip the whole screen, not just its name (#15 persistence)', () => {
+  const view = makeView();
+  view.navigate('class', 'c1', null, null, null, null, 'sem-2');
+  view.navigateTab('Exams');
+  view.navigate('assignment', 'c1', null, 'a1');
+  const saved = JSON.parse(JSON.stringify(view.getState())); // as workspace.json stores it
+
+  const reopened = makeView();
+  reopened.setState(saved, { history: true, layout: true, close: false });
+
+  assert.equal(reopened.screen, 'assignment');
+  assert.equal(reopened.currentAssignmentId, 'a1');
+  assert.equal(reopened.viewedSemesterId, 'sem-2');
+  assert.equal(reopened.enteredViaCourses, true);
+  assert.deepEqual(reopened.origin, view.origin, 'the "back to X" button survives too');
+});
+
+test('setState() on a layout saved before #35 leaves the default screen alone', () => {
+  const view = makeView();
+  view.setState({}, { history: true, layout: true, close: false });
+  assert.equal(view.screen, 'dashboard');
 });

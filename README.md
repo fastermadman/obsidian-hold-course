@@ -307,12 +307,18 @@ Hold Course registers several commands in Obsidian's command palette (Ctrl/Cmd+P
 - Add a class — opens the Add Class dialog for the active semester
 - Open calendar — opens the main tab and navigates directly to Calendar view
 - Show global assignments — opens the main tab and navigates to the Assignments view
-- Back / Forward — steps through your actual navigation history on the main tab, separate from each detail screen's own back-to-list button (no default hotkey — bind one in Settings > Hotkeys if you want it)
 - Add a library resource — opens the Add Resource dialog for the active semester
 - Add a lecture — opens the Add Lecture dialog for the current class (requires an open class screen)
 - Add an assignment — opens the Add Assignment dialog for the current class (requires an open class screen)
 
 All commands are hotkey-bindable via Settings > Hotkeys.
+
+Back and forward are **not** Hold Course commands: the main tab plugs into Obsidian's own
+per-pane history, so **Navigate back** / **Navigate forward** (Ctrl/Cmd+Alt+Left/Right), the
+back/forward arrows in the pane header, and the two-finger horizontal swipe on mobile all step
+through the Hold Course screens you visited. That is separate from each detail screen's own
+named back-to-list button ("← All Assignments"), which goes to one specific place rather than
+one step back.
 
 ---
 

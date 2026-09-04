@@ -1004,28 +1004,11 @@ class HoldCoursePlugin extends Plugin {
       callback: () => this.activateAndNavigate('assignments'),
     });
 
-    // Command-only, deliberately no default hotkey (bind your own) and no
-    // button in the UI — see the "along" vs. "back" distinction in
-    // HoldCourseView's constructor comment (#14). Silent no-op when there's
-    // nowhere to go, same as the disabled state prev/next chevrons use.
-    this.addCommand({
-      id: 'hc-nav-back',
-      name: 'Back',
-      callback: () => {
-        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
-        if (leaf?.view instanceof HoldCourseView) leaf.view.back();
-      },
-    });
-
-    this.addCommand({
-      id: 'hc-nav-forward',
-      name: 'Forward',
-      callback: () => {
-        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
-        if (leaf?.view instanceof HoldCourseView) leaf.view.forward();
-      },
-    });
-
+    // No hc-nav-back/hc-nav-forward commands: #35 replaced them with
+    // Obsidian's own history, so Navigate back/forward (Mod+Alt+Left/Right),
+    // the pane's header arrows and the mobile two-finger swipe all drive
+    // Hold Course directly. Two commands doing the same job as the app's own
+    // would just be a second, worse entry point.
     this.addCommand({
       id: 'hc-add-library-resource',
       name: 'Add a library resource',
@@ -1775,17 +1758,24 @@ class HoldCourseView extends ItemView {
     //    list* (see _originSequence()). A stack pop has no name and, for list
     //    work (open/back/open/back), leaves a meaningless "forward" — a named
     //    place is the better fit here even though it's not what a browser does.
-    //  - "Back"/"forward" as an actual undo history: `history`/`histIndex`,
-    //    exposed only as commands (Hold Course: Back/Forward), never as a
-    //    button, so it never competes with the named `origin` back button.
+    //  - "Back"/"forward" as an actual undo history: Obsidian's OWN leaf
+    //    history, driven by getState()/setState() below (#35). Surfaced by
+    //    the pane's native back/forward arrows, Mod+Alt+Left/Right and the
+    //    mobile two-finger swipe — never by a button of ours, so it still
+    //    never competes with the named `origin` back button. #14 kept a
+    //    private `history`/`histIndex` stack here; it was the same stack
+    //    Obsidian already maintains per leaf, minus the native entry points.
     //
     // Replaces the old `previousScreen`, which stored only the single most
     // recent screen *name* and was silently overwritten by the first
     // prev/next click — the exact bug that made Assignment detail's old
     // contextual back button degrade after one chevron press.
     this.origin = null;   // { screen, classId, lectureId, assignmentId, examId, resourceId, tab, scrollTop } | null
-    this.history = [];
-    this.histIndex = -1;
+    // Gates ALL of Obsidian's navigation surface — the header arrows, the
+    // app:go-back/go-forward commands and the mobile swipe each check
+    // view.navigation before doing anything, and leaf.recordHistory() drops
+    // entries for a view that doesn't set it.
+    this.navigation = true;
     this._inRender = false;
     // Filter/sort state rule (#14 audit, not yet fully applied — see #16):
     // *screen-shaped* state (which filter, which tab, which month) belongs
@@ -1827,10 +1817,14 @@ class HoldCourseView extends ItemView {
   async onClose() { this._closeSemDrop(); this._closeCalPopover(); }
 
   navigate(screen, classId = null, lectureId = null, assignmentId = null, examId = null, resourceId = null, semesterId = null) {
-    // Capture where we're leaving BEFORE any state changes — this writes
-    // into the CURRENT (pre-navigation) history entry, which is only
-    // addressable via histIndex before _pushHistory() below moves it.
-    this._captureScrollIntoCurrentEntry();
+    // Record where we're leaving BEFORE any state changes: Obsidian's leaf
+    // history stores the OUTGOING state, and reads it off this view's
+    // getState()/getEphemeralState() at exactly this moment. Skipped when the
+    // destination is where we already are, so re-clicking the current screen
+    // doesn't leave behind a back press that visibly does nothing.
+    if (!this._identityEqual(this._identity(), {
+      screen, classId, lectureId, assignmentId, examId, resourceId,
+    }, false)) this._recordHistory();
 
     // Which semester the detail screens resolve against. Deliberately gated on
     // classId alone, NOT on screen === 'class': the calendar and the Today
@@ -1886,14 +1880,11 @@ class HoldCourseView extends ItemView {
     this.currentAssignmentId = assignmentId;
     this.currentExamId = examId;
     this.currentResourceId = resourceId;
-    this._pushHistory();
     this.render();
   }
 
   // ─── History (back/forward) ──────────────────────────────────────────────
-  // Command-only (Hold Course: Back/Forward, no default hotkey) — deliberately
-  // never a button, so it never competes with the named `origin` back button.
-  // See the constructor comment for why both exist.
+  // Obsidian's own per-leaf stack, not ours — see the constructor comment.
 
   // Shared by _snapshot() and render()'s _identity() calls below — one 7-field
   // shape, one place it's built.
@@ -1905,8 +1896,8 @@ class HoldCourseView extends ItemView {
     };
   }
 
-  // `includeTab` differs by caller: history push-dedup (_pushHistory) ignores
-  // tab — a tab switch alone isn't a navigation, see navigateTab. render()'s
+  // `includeTab` differs by caller: navigate()'s record-dedup ignores tab —
+  // a tab switch alone isn't a navigation, see navigateTab. render()'s
   // same-screen check includes it — switching tabs should reset scroll like
   // any other screen change.
   _identityEqual(a, b, includeTab) {
@@ -1918,59 +1909,78 @@ class HoldCourseView extends ItemView {
 
   _snapshot() {
     return {
-      ...this._identity(), origin: this.origin, scrollTop: 0,
+      ...this._identity(), origin: this.origin,
       // Both class-subtree-scoped, same lifetime as classId itself — without
-      // these, back()/forward() into a class reached via Courses would
+      // these, a back/forward press into a class reached via Courses would
       // silently resolve against the wrong semester (see _getViewedSemester).
       viewedSemesterId: this.viewedSemesterId, enteredViaCourses: this.enteredViaCourses,
     };
   }
 
-  _pushHistory() {
-    const snap = this._snapshot();
+  // Obsidian records a leaf history entry only when a view asks it to.
+  // Routing navigate() through leaf.setViewState() — the obvious guess — does
+  // NOT work: setViewState only records when it had to construct a NEW view
+  // (it sets result.history in the type-changed branch alone, and a popstate
+  // clears it again), so a same-type call reuses this instance and records
+  // nothing. Verified against Obsidian 1.13.1's app.js; core's own Web viewer
+  // pushes its entries this way for the same reason.
+  //
+  // recordHistory()/getHistoryState() are not in obsidian.d.ts. Feature-detect
+  // rather than trust them: an Obsidian that drops them costs us back/forward,
+  // never a crash.
+  _recordHistory() {
     // A missing/deleted-data guard inside a renderer calls navigate() to
     // redirect while render() is still executing (render -> renderer ->
-    // navigate -> render, recursively). Pushing there would stack a dead
-    // entry that back() could never get past — replace it instead, which
-    // makes back self-healing after something the user was looking at gets
-    // deleted out from under them.
-    if (this._inRender && this.histIndex >= 0) {
-      this.history[this.histIndex] = snap;
-      return;
-    }
-    if (this._identityEqual(this.history[this.histIndex], snap, false)) return;
-    this.history = this.history.slice(0, this.histIndex + 1);
-    this.history.push(snap);
-    this.histIndex = this.history.length - 1;
-    if (this.history.length > 50) {
-      this.history.shift();
-      this.histIndex--;
-    }
+    // navigate -> render, recursively). The screen it's leaving is one the
+    // user never saw, so it must not become a back target — skip rather than
+    // record. #14's stack replaced the top entry here for the same reason;
+    // skipping is the same fix against a stack whose current position isn't
+    // an entry at all (Obsidian reads the live state instead).
+    if (this._inRender) return;
+    const leaf = this.leaf;
+    if (!leaf || typeof leaf.recordHistory !== 'function' || typeof leaf.getHistoryState !== 'function') return;
+    leaf.recordHistory(leaf.getHistoryState());
   }
 
-  _captureScrollIntoCurrentEntry() {
-    if (this.histIndex < 0 || !this.history[this.histIndex]) return;
+  // ─── Obsidian view state ─────────────────────────────────────────────────
+  // What the native back/forward buttons actually move through:
+  // leaf.history.go() pops an entry and hands its `state` back via
+  // setViewState(), which — same view type — reuses this instance and calls
+  // setState() alone. Nothing is torn down, so listeners, the `_inRender`
+  // guard and the DOM all survive a back press.
+  //
+  // Obsidian also writes getState() into workspace.json (leaf.serialize), so
+  // this is also what makes the open screen survive a reload (#15).
+
+  getState() { return this._snapshot(); }
+
+  async setState(state, result) {
+    // A leaf restored from a layout saved before #35 has no screen — leave
+    // the constructor's default (dashboard) alone rather than blanking it.
+    if (!state || !state.screen) return;
+    this._restore(state);
+  }
+
+  // Scroll position is *ephemeral* state in Obsidian's model: carried on the
+  // history entry beside `state`, and re-applied by setViewState() AFTER
+  // setState(). That ordering is why render() can drop a navigated-to screen
+  // at 0 and a back press still lands on the offset you left.
+  getEphemeralState() {
     const scrollEl = this._getScrollEl();
-    if (scrollEl) this.history[this.histIndex].scrollTop = scrollEl.scrollTop;
+    return { scrollTop: scrollEl ? scrollEl.scrollTop : 0 };
   }
 
-  back() {
-    if (this.histIndex <= 0) return;
-    this._captureScrollIntoCurrentEntry();
-    this.histIndex--;
-    this._restore(this.history[this.histIndex]);
+  setEphemeralState(state) {
+    // Obsidian also calls this with unrelated payloads ({ focus: true }).
+    if (!state || typeof state.scrollTop !== 'number') return;
+    const scrollEl = this._getScrollEl();
+    if (scrollEl) scrollEl.scrollTop = Math.min(state.scrollTop, scrollEl.scrollHeight);
   }
 
-  forward() {
-    if (this.histIndex >= this.history.length - 1) return;
-    this._captureScrollIntoCurrentEntry();
-    this.histIndex++;
-    this._restore(this.history[this.histIndex]);
-  }
-
-  // Applies a history entry directly and re-renders WITHOUT going through
-  // navigate() — going through it would push a new entry and truncate the
-  // very forward history back()/forward() exist to move through.
+  // Applies a state object and re-renders WITHOUT going through navigate() —
+  // going through it would record a fresh entry and, since a push clears
+  // Obsidian's forwardHistory, wipe the very forward branch a back press
+  // exists to move back along.
   _restore(snap) {
     this.screen = snap.screen;
     this.currentClassId = snap.classId;
@@ -2000,14 +2010,12 @@ class HoldCourseView extends ItemView {
 
   // A tab switch is state ON the current screen, not a navigation to a new
   // one — see the constructor comment's "screen-shaped state" rule. It
-  // updates the current history entry in place (so returning to this screen
-  // via back/forward restores the tab you left it on) but does not push:
-  // back always means "somewhere else", never "same place, other tab".
+  // records no history entry: back always means "somewhere else", never
+  // "same place, other tab". Returning to this screen still lands on the tab
+  // you left it on, because the entry recorded when you eventually navigate
+  // AWAY reads `tab` live off getState().
   navigateTab(tab) {
     this.currentTab = tab;
-    if (this.histIndex >= 0 && this.history[this.histIndex]) {
-      this.history[this.histIndex].tab = tab;
-    }
     this.render();
   }
 
@@ -2028,9 +2036,9 @@ class HoldCourseView extends ItemView {
     // removes it. Same-screen re-renders (a status toggle, a filter change —
     // any of the ~70 call sites that call render() directly rather than
     // navigate()) restore `outgoingTop` once the new DOM exists; a genuine
-    // navigation restores from the history entry instead (0 for a screen
-    // visited for the first time). navigate()/back()/forward() already wrote
-    // the OUTGOING screen's position into ITS entry before calling here.
+    // navigation lands at 0. A back/forward press is a genuine navigation
+    // too, but Obsidian applies its saved offset through setEphemeralState()
+    // after this call returns, so it overrides the 0 rather than racing it.
     const outgoingScrollEl = this._getScrollEl();
     const outgoingTop = outgoingScrollEl ? outgoingScrollEl.scrollTop : 0;
     const priorIdentity = this._lastRenderedIdentity;
@@ -2039,7 +2047,7 @@ class HoldCourseView extends ItemView {
 
     // Re-entrancy guard: a missing/deleted-data redirect inside a renderer
     // below calls navigate(), which calls render() again before this call
-    // has returned. `_pushHistory()` uses this flag to replace rather than
+    // has returned. `_recordHistory()` uses this flag to skip rather than
     // stack a dead entry (see there); this call restores it afterward
     // rather than just clearing it, so a redirect nested inside an outer
     // recursive call doesn't prematurely un-flag the outer one.
@@ -2082,7 +2090,7 @@ class HoldCourseView extends ItemView {
     if (!this._identityEqual(targetIdentity, this._identity(), true)) return;
 
     this._lastRenderedIdentity = targetIdentity;
-    const restoreTo = sameScreen ? outgoingTop : (this.history[this.histIndex]?.scrollTop || 0);
+    const restoreTo = sameScreen ? outgoingTop : 0;
     const scrollEl = this._getScrollEl();
     if (scrollEl) scrollEl.scrollTop = Math.min(restoreTo, scrollEl.scrollHeight);
   }
@@ -2272,9 +2280,9 @@ class HoldCourseView extends ItemView {
     if (o.screen === 'today') { this.navigate('dashboard'); return; }
     if (o.tab) this.currentTab = o.tab;
     this.navigate(o.screen, o.classId || null, o.lectureId || null, o.assignmentId || null, o.examId || null, o.resourceId || null);
-    // navigate() just pushed a fresh entry for the destination (scrollTop 0) —
-    // override with the offset captured when this origin was set, same clamp
-    // render()'s own restore uses.
+    // navigate() lands the destination at scrollTop 0 — override with the
+    // offset captured when this origin was set, same clamp render()'s own
+    // restore uses.
     const scrollEl = this._getScrollEl();
     if (scrollEl) scrollEl.scrollTop = Math.min(o.scrollTop || 0, scrollEl.scrollHeight);
   }
@@ -8049,12 +8057,11 @@ class HoldCourseTodayView extends ItemView {
     // navigate()'s own origin rule just snapshotted whatever the main view
     // happened to be showing before this call — meaningless here, since
     // that's a different leaf the user wasn't looking at. Override with an
-    // explicit "Today" origin instead (#14), and patch the history entry
-    // navigate() already pushed to match, so back() reflects it too.
+    // explicit "Today" origin instead (#14). Nothing to patch alongside it
+    // any more: the history entry navigate() recorded is the screen we LEFT,
+    // and the current one is read live off getState() (#35), so this
+    // assignment is already the whole fix.
     view.origin = { screen: 'today' };
-    if (view.histIndex >= 0 && view.history[view.histIndex]) {
-      view.history[view.histIndex].origin = view.origin;
-    }
     view.render();
   }
 }

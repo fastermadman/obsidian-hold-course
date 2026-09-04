@@ -180,6 +180,14 @@ site changes, and makes back self-healing after a deletion.
 with the others (`:760-846`) following `activateAndNavigate` (`:913`). **No default hotkey**
 — the user binds them. Silent no-op when there is nowhere to go.
 
+> **Superseded by #35.** These two commands shipped as designed and were then removed: the
+> private `history`/`histIndex` stack described in this section is the same stack Obsidian
+> already keeps per leaf, so the plugin now feeds *that* one (`view.navigation`,
+> `getState()`/`setState()`, `leaf.recordHistory()`) and inherits the pane's native
+> back/forward arrows, Mod+Alt+Left/Right and the mobile swipe instead. The `_inRender`
+> guard survives, as a skip rather than a replace. Everything about the "along" axis
+> (`origin`, prev/next) in this document still stands.
+
 ## 4. Scroll restoration — two halves
 
 No `scrollTop` handling exists in 7,100 lines, while `render()` is called from **71 sites**
