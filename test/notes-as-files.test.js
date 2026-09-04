@@ -6,6 +6,8 @@ const {
   splitFrontmatter,
   sanitizeNoteFilename,
   buildNoteStub,
+  mergeResourceFrontmatter,
+  applyFrontmatterToResource,
 } = require('./_bootstrap.js');
 
 // #5b: "file is truth" resource notes. These cover the pure parsing/formatting
@@ -76,4 +78,66 @@ test('buildNoteStub: existing data.json notes text is migrated into the body', (
   const out = buildNoteStub({ id: 'r1', title: 'T', notes: 'my old notes' }, '', '');
   const { body } = splitFrontmatter(out);
   assert.equal(body.trim(), 'my old notes');
+});
+
+test('buildNoteStub: hc_type is written when the resource has a type', () => {
+  const out = buildNoteStub({ id: 'r1', title: 'T', type: 'Book' }, '', '');
+  assert.match(out, /hc_type: "Book"/);
+  assert.doesNotMatch(buildNoteStub({ id: 'r1', title: 'T' }, '', ''), /hc_type/);
+});
+
+// #5b Del A: field <-> frontmatter sync (write side).
+
+test('mergeResourceFrontmatter: writes non-empty fields into our own stub', () => {
+  const fm = { hc_resource_id: 'r1' };
+  const changed = mergeResourceFrontmatter(fm, { id: 'r1', title: 'T', author: 'A', type: 'Book' });
+  assert.equal(changed, true);
+  assert.deepEqual(fm, { hc_resource_id: 'r1', hc_title: 'T', hc_author: 'A', hc_type: 'Book' });
+});
+
+test('mergeResourceFrontmatter: refuses a stub that is not ours', () => {
+  const fm = { hc_resource_id: 'other' };
+  assert.equal(mergeResourceFrontmatter(fm, { id: 'r1', title: 'T' }), false);
+  assert.deepEqual(fm, { hc_resource_id: 'other' });
+  assert.equal(mergeResourceFrontmatter({}, { id: 'r1', title: 'T' }), false);
+});
+
+test('mergeResourceFrontmatter: an emptied field never deletes an existing key', () => {
+  const fm = { hc_resource_id: 'r1', hc_author: 'Old Author', hc_type: 'Book' };
+  const changed = mergeResourceFrontmatter(fm, { id: 'r1', title: 'T', author: '', type: '  ' });
+  assert.equal(changed, true); // hc_title added
+  assert.equal(fm.hc_author, 'Old Author');
+  assert.equal(fm.hc_type, 'Book');
+});
+
+test('mergeResourceFrontmatter: no change when values already match', () => {
+  const fm = { hc_resource_id: 'r1', hc_title: 'T', hc_author: 'A', hc_type: 'Book' };
+  assert.equal(mergeResourceFrontmatter(fm, { id: 'r1', title: 'T', author: 'A', type: 'Book' }), false);
+});
+
+// #5b Del A: field <-> frontmatter sync (read side).
+
+test('applyFrontmatterToResource: file frontmatter overrides the JSON fields', () => {
+  const resource = { id: 'r1', title: 'stale', author: 'stale', type: '' };
+  const changed = applyFrontmatterToResource(
+    { hc_resource_id: 'r1', hc_title: 'Fresh', hc_author: 'Fresh Author', hc_type: 'PDF' },
+    resource,
+  );
+  assert.equal(changed, true);
+  assert.deepEqual(resource, { id: 'r1', title: 'Fresh', author: 'Fresh Author', type: 'PDF' });
+});
+
+test('applyFrontmatterToResource: ignores frontmatter from someone else\'s file', () => {
+  const resource = { id: 'r1', title: 'mine' };
+  assert.equal(applyFrontmatterToResource({ hc_resource_id: 'other', hc_title: 'theirs' }, resource), false);
+  assert.equal(applyFrontmatterToResource(undefined, resource), false);
+  assert.equal(resource.title, 'mine');
+});
+
+test('applyFrontmatterToResource: a missing or blank hc_ key leaves the JSON value alone', () => {
+  const resource = { id: 'r1', title: 'T', author: 'Keep', type: 'Book' };
+  const changed = applyFrontmatterToResource({ hc_resource_id: 'r1', hc_title: 'T', hc_author: '   ' }, resource);
+  assert.equal(changed, false);
+  assert.equal(resource.author, 'Keep');
+  assert.equal(resource.type, 'Book');
 });

@@ -154,6 +154,7 @@ function buildNoteStub(resource, classCode, sourceLink) {
   const q = (v) => JSON.stringify(String(v));
   const fm = ['---', `hc_resource_id: ${q(resource.id)}`, `hc_title: ${q(resource.title || '')}`];
   if (resource.author) fm.push(`hc_author: ${q(resource.author)}`);
+  if (resource.type) fm.push(`hc_type: ${q(resource.type)}`);
   if (classCode) fm.push(`hc_class: ${q(classCode)}`);
   fm.push('---', '');
   let out = fm.join('\n') + '\n';
@@ -161,6 +162,62 @@ function buildNoteStub(resource, classCode, sourceLink) {
   const body = (resource.notes || '').trim();
   if (body) out += body + '\n';
   return out;
+}
+
+// #5b Del A: which resource fields mirror into the note stub's frontmatter.
+// hc_-prefixed so they never collide with a bare `title`/`type` — VIAstudyWiz'
+// material notes use `type:` in a different taxonomy, and resources have no
+// sync path to author/type, so nothing upstream fights us for these keys.
+const RESOURCE_FM_FIELDS = { title: 'hc_title', author: 'hc_author', type: 'hc_type' };
+
+// Write side: merge the resource's fields into a frontmatter object in place.
+// Guarded to our own stubs (hc_resource_id match). Only non-empty values are
+// written; an emptied Hold Course field never deletes a key that's already
+// there (it may exist for the user's own Dataview queries). Returns whether
+// anything changed.
+function mergeResourceFrontmatter(fm, resource) {
+  if (!fm || fm.hc_resource_id !== resource.id) return false;
+  let changed = false;
+  for (const [field, key] of Object.entries(RESOURCE_FM_FIELDS)) {
+    const val = String(resource[field] || '').trim();
+    if (val && fm[key] !== val) { fm[key] = val; changed = true; }
+  }
+  return changed;
+}
+
+// Read side: pull hc_* frontmatter values back onto the resource — once a stub
+// exists, its frontmatter is the source of truth for these fields and the JSON
+// is a read-through cache. Same ownership guard. Returns whether anything
+// changed.
+function applyFrontmatterToResource(fm, resource) {
+  if (!fm || fm.hc_resource_id !== resource.id) return false;
+  let changed = false;
+  for (const [field, key] of Object.entries(RESOURCE_FM_FIELDS)) {
+    const v = fm[key];
+    if (typeof v === 'string' && v.trim() && v !== resource[field]) {
+      resource[field] = v;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+// Write side wrapper: merge the resource's current fields into its linked stub
+// via the native frontmatter API (no hand-rolled YAML). Silent no-op if there
+// is no linked file or it isn't one of ours — the JSON write already happened,
+// this is the mirror. #5b Del A.
+async function writeResourceFrontmatter(app, resource) {
+  const path = resource.notesLink;
+  if (!path) return;
+  const file = app.vault.getAbstractFileByPath(path);
+  if (!file) return;
+  try {
+    await app.fileManager.processFrontMatter(file, (fm) => {
+      mergeResourceFrontmatter(fm, resource);
+    });
+  } catch (e) {
+    // file vanished or is read-only — the resource JSON still saved fine
+  }
 }
 
 // A semester's position on the timeline. null means it has none at all — no
@@ -3741,6 +3798,8 @@ class HoldCourseView extends ItemView {
     const resource = this.plugin.findResource(sem.id, this.currentResourceId);
     if (!resource) { this.currentTab = 'Library'; this.navigate('class', cls.id); return; }
 
+    this._syncResourceFromNoteFrontmatter(resource);
+
     const color = getColor(cls.colorIndex);
 
     // Back button dropped: the breadcrumb's class-code link already navigates
@@ -4065,6 +4124,18 @@ class HoldCourseView extends ItemView {
     if (resource.notesLink && file && resource.notesLink === file.path) return true;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
     return !!fm && fm.hc_resource_id === resource.id;
+  }
+
+  // #5b Del A read path: when the resource screen opens, pull hc_* values from
+  // the linked stub's frontmatter onto the resource. Sync + best-effort — if
+  // the file isn't in Obsidian's index yet, the next open catches it. No vault
+  // watcher, so there's nothing reactive to loop on.
+  _syncResourceFromNoteFrontmatter(resource) {
+    if (this.plugin.data.fileIsTruth !== true || !resource.notesLink) return;
+    const file = this.app.vault.getAbstractFileByPath(resource.notesLink);
+    if (!file) return;
+    const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    if (applyFrontmatterToResource(fm, resource)) this.plugin.save();
   }
 
   // Replace the note body, leaving any frontmatter block untouched.
@@ -7206,6 +7277,10 @@ class EditResourceModal extends Modal {
       vaultLink: this.formData.vaultLink.trim(),
       url: this.formData.url.trim(),
     });
+    // #5b Del A: mirror title/author/type into the linked stub's frontmatter.
+    if (this.plugin.data.fileIsTruth === true) {
+      writeResourceFrontmatter(this.app, this.resource);
+    }
     this.onSave();
     this.close();
   }
@@ -7427,6 +7502,8 @@ Object.assign(module.exports, {
   splitFrontmatter,
   sanitizeNoteFilename,
   buildNoteStub,
+  mergeResourceFrontmatter,
+  applyFrontmatterToResource,
 });
 
 /* nosourcemap */
