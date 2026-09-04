@@ -1783,7 +1783,7 @@ class HoldCourseView extends ItemView {
     // recent screen *name* and was silently overwritten by the first
     // prev/next click — the exact bug that made Assignment detail's old
     // contextual back button degrade after one chevron press.
-    this.origin = null;   // { screen, classId, lectureId, assignmentId, examId, resourceId, tab } | null
+    this.origin = null;   // { screen, classId, lectureId, assignmentId, examId, resourceId, tab, scrollTop } | null
     this.history = [];
     this.histIndex = -1;
     this._inRender = false;
@@ -1866,10 +1866,15 @@ class HoldCourseView extends ItemView {
     if (screen === this.screen) {
       // no change
     } else if (DETAIL_SCREENS.includes(screen)) {
+      // scrollTop: where the working set was scrolled to when this detail was
+      // opened — read now because navigate() always pushes a fresh history
+      // entry (scrollTop 0) for the destination, so _navigateToOrigin()'s own
+      // trip through navigate() can't recover it from `history` afterward.
+      const originScrollEl = this._getScrollEl();
       this.origin = {
         screen: this.screen, classId: this.currentClassId, lectureId: this.currentLectureId,
         assignmentId: this.currentAssignmentId, examId: this.currentExamId, resourceId: this.currentResourceId,
-        tab: this.currentTab,
+        tab: this.currentTab, scrollTop: originScrollEl ? originScrollEl.scrollTop : 0,
       };
     } else {
       this.origin = null;
@@ -1890,22 +1895,35 @@ class HoldCourseView extends ItemView {
   // never a button, so it never competes with the named `origin` back button.
   // See the constructor comment for why both exist.
 
-  _snapshot() {
+  // Shared by _snapshot() and render()'s _identity() calls below — one 7-field
+  // shape, one place it's built.
+  _identity() {
     return {
       screen: this.screen, classId: this.currentClassId, lectureId: this.currentLectureId,
       assignmentId: this.currentAssignmentId, examId: this.currentExamId, resourceId: this.currentResourceId,
-      tab: this.currentTab, origin: this.origin, scrollTop: 0,
+      tab: this.currentTab,
+    };
+  }
+
+  // `includeTab` differs by caller: history push-dedup (_pushHistory) ignores
+  // tab — a tab switch alone isn't a navigation, see navigateTab. render()'s
+  // same-screen check includes it — switching tabs should reset scroll like
+  // any other screen change.
+  _identityEqual(a, b, includeTab) {
+    if (!a || !b) return false;
+    return a.screen === b.screen && a.classId === b.classId && a.lectureId === b.lectureId &&
+      a.assignmentId === b.assignmentId && a.examId === b.examId && a.resourceId === b.resourceId &&
+      (!includeTab || a.tab === b.tab);
+  }
+
+  _snapshot() {
+    return {
+      ...this._identity(), origin: this.origin, scrollTop: 0,
       // Both class-subtree-scoped, same lifetime as classId itself — without
       // these, back()/forward() into a class reached via Courses would
       // silently resolve against the wrong semester (see _getViewedSemester).
       viewedSemesterId: this.viewedSemesterId, enteredViaCourses: this.enteredViaCourses,
     };
-  }
-
-  _snapshotsEqual(a, b) {
-    if (!a || !b) return false;
-    return a.screen === b.screen && a.classId === b.classId && a.lectureId === b.lectureId &&
-      a.assignmentId === b.assignmentId && a.examId === b.examId && a.resourceId === b.resourceId;
   }
 
   _pushHistory() {
@@ -1920,7 +1938,7 @@ class HoldCourseView extends ItemView {
       this.history[this.histIndex] = snap;
       return;
     }
-    if (this._snapshotsEqual(this.history[this.histIndex], snap)) return;
+    if (this._identityEqual(this.history[this.histIndex], snap, false)) return;
     this.history = this.history.slice(0, this.histIndex + 1);
     this.history.push(snap);
     this.histIndex = this.history.length - 1;
@@ -2002,21 +2020,6 @@ class HoldCourseView extends ItemView {
     return this.contentEl ? this.contentEl.querySelector('.hc-content') : null;
   }
 
-  _currentIdentity() {
-    return {
-      screen: this.screen, classId: this.currentClassId, lectureId: this.currentLectureId,
-      assignmentId: this.currentAssignmentId, examId: this.currentExamId, resourceId: this.currentResourceId,
-      tab: this.currentTab,
-    };
-  }
-
-  _sameIdentity(a, b) {
-    if (!a || !b) return false;
-    return a.screen === b.screen && a.classId === b.classId && a.lectureId === b.lectureId &&
-      a.assignmentId === b.assignmentId && a.examId === b.examId && a.resourceId === b.resourceId &&
-      a.tab === b.tab;
-  }
-
   render() {
     this._closeSemDrop();
     this._closeCalPopover();
@@ -2031,8 +2034,8 @@ class HoldCourseView extends ItemView {
     const outgoingScrollEl = this._getScrollEl();
     const outgoingTop = outgoingScrollEl ? outgoingScrollEl.scrollTop : 0;
     const priorIdentity = this._lastRenderedIdentity;
-    const targetIdentity = this._currentIdentity();
-    const sameScreen = this._sameIdentity(priorIdentity, targetIdentity);
+    const targetIdentity = this._identity();
+    const sameScreen = this._identityEqual(priorIdentity, targetIdentity, true);
 
     // Re-entrancy guard: a missing/deleted-data redirect inside a renderer
     // below calls navigate(), which calls render() again before this call
@@ -2076,7 +2079,7 @@ class HoldCourseView extends ItemView {
     // and scrolled the real, redirected screen — stop here rather than
     // overwrite it with bookkeeping computed for the screen we never
     // actually rendered.
-    if (!this._sameIdentity(targetIdentity, this._currentIdentity())) return;
+    if (!this._identityEqual(targetIdentity, this._identity(), true)) return;
 
     this._lastRenderedIdentity = targetIdentity;
     const restoreTo = sameScreen ? outgoingTop : (this.history[this.histIndex]?.scrollTop || 0);
@@ -2265,6 +2268,11 @@ class HoldCourseView extends ItemView {
     if (o.screen === 'today') { this.navigate('dashboard'); return; }
     if (o.tab) this.currentTab = o.tab;
     this.navigate(o.screen, o.classId || null, o.lectureId || null, o.assignmentId || null, o.examId || null, o.resourceId || null);
+    // navigate() just pushed a fresh entry for the destination (scrollTop 0) —
+    // override with the offset captured when this origin was set, same clamp
+    // render()'s own restore uses.
+    const scrollEl = this._getScrollEl();
+    if (scrollEl) scrollEl.scrollTop = Math.min(o.scrollTop || 0, scrollEl.scrollHeight);
   }
 
   _originLabel(origin) {

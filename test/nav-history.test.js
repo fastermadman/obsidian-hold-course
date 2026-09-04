@@ -23,7 +23,7 @@ test('origin is set opening a detail screen from a list screen', () => {
   view.navigate('assignment', 'c1', null, 'a1');
   assert.deepEqual(view.origin, {
     screen: 'assignments', classId: null, lectureId: null,
-    assignmentId: null, examId: null, resourceId: null, tab: 'Lectures',
+    assignmentId: null, examId: null, resourceId: null, tab: 'Lectures', scrollTop: 0,
   });
 });
 
