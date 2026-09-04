@@ -167,6 +167,10 @@ function buildNoteStub(item, classCode, sourceLink, idKey = 'hc_resource_id') {
   return out;
 }
 
+// #5b Del B: base folder for auto-created note files; each kind (resources,
+// lectures) gets its own subfolder underneath — see _createNoteStub.
+const DEFAULT_NOTES_FOLDER = 'HoldCourse/Notes';
+
 // #5b Del A: which resource fields mirror into the note stub's frontmatter.
 // hc_-prefixed so they never collide with a bare `title`/`type` — VIAstudyWiz'
 // material notes use `type:` in a different taxonomy, and resources have no
@@ -1601,8 +1605,8 @@ class HoldCourseSettingTab extends PluginSettingTab {
     // Stored in data.json (not device-settings.json): the note files sync
     // between devices, so this decision has to travel with them.
     new Setting(containerEl)
-      .setName('Book notes as vault files')
-      .setDesc('Store each resource\'s notes in their own markdown file instead of inside the plugin\'s data. The file is the source of truth; existing notes are moved into it the first time you edit. Hold Course only ever writes files it created itself.')
+      .setName('Notes as vault files')
+      .setDesc('Store each reading\'s and lecture\'s notes in their own markdown file instead of inside the plugin\'s data. The file is the source of truth; existing notes are moved into it the first time you edit. Hold Course only ever writes files it created itself.')
       .addToggle((toggle) => toggle
         .setValue(this.plugin.data.fileIsTruth === true)
         .onChange(async (value) => {
@@ -1612,10 +1616,10 @@ class HoldCourseSettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
-      .setName('Book notes folder')
-      .setDesc('Where auto-created note files go. Relative to the vault root.')
+      .setName('Notes folder')
+      .setDesc('Where auto-created note files go, relative to the vault root — a Readings/ subfolder for resource notes and a Lectures/ subfolder for lecture notes are created under it.')
       .addText((text) => text
-        .setPlaceholder('HoldCourse/Books')
+        .setPlaceholder(DEFAULT_NOTES_FOLDER)
         .setValue(this.plugin.data.notesFolder || '')
         .onChange(async (value) => {
           this.plugin.data.notesFolder = value.trim();
@@ -4036,6 +4040,7 @@ class HoldCourseView extends ItemView {
     const cls = (sem.classes || []).find(c => (resource.classIds || []).includes(c.id));
     this._renderFileNote(container, resource, {
       idKey: 'hc_resource_id',
+      subfolder: 'Readings',
       classCode: cls ? cls.code : '',
       sourceLink: resource.vaultLink || '',
       filename: resource.title,
@@ -4061,6 +4066,7 @@ class HoldCourseView extends ItemView {
     }
     this._renderFileNote(container, lec, {
       idKey: 'hc_lecture_id',
+      subfolder: 'Lectures',
       classCode: cls ? cls.code : '',
       sourceLink: lec.vaultLink || '',
       filename: lec.date ? `${lec.date} ${lec.title}` : lec.title,
@@ -4194,14 +4200,15 @@ class HoldCourseView extends ItemView {
   }
 
   async _createNoteStub(item, spec) {
-    const folder = (this.plugin.data.notesFolder || 'HoldCourse/Books').replace(/^\/+|\/+$/g, '');
-    if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
+    const root = (this.plugin.data.notesFolder || DEFAULT_NOTES_FOLDER).replace(/^\/+|\/+$/g, '');
+    const folder = root ? `${root}/${spec.subfolder}` : spec.subfolder;
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
       try { await this.app.vault.createFolder(folder); } catch (e) { /* already there */ }
     }
     const base = sanitizeNoteFilename(spec.filename);
-    let path = folder ? `${folder}/${base}.md` : `${base}.md`;
+    let path = `${folder}/${base}.md`;
     for (let n = 2; await this.app.vault.adapter.exists(path); n++) {
-      path = folder ? `${folder}/${base} (${n}).md` : `${base} (${n}).md`;
+      path = `${folder}/${base} (${n}).md`;
     }
     await this.app.vault.create(path, buildNoteStub(item, spec.classCode, spec.sourceLink, spec.idKey));
     item.notesLink = path;
