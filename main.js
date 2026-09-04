@@ -3781,6 +3781,14 @@ class HoldCourseView extends ItemView {
   // replaces, so callers still just this.plugin.save() nothing extra.
   _renderClickToEditNote(container, obj, key, placeholder) {
     const wrap = container.createDiv('hc-note-edit');
+    // The mouse-up that blurs the textarea also fires a `click`, and it
+    // usually lands on the fresh preview box sitting in the same spot —
+    // without this guard the field bounces straight back into edit mode and
+    // never appears rendered until the screen is re-navigated. Armed on
+    // blur, consumed by that trailing click; the setTimeout clears it for
+    // the case where the click landed elsewhere (button, Tab-away), which
+    // runs after the trailing click in the same UI-event turn.
+    let swallowNextClick = false;
 
     const showEditor = () => {
       wrap.empty();
@@ -3790,6 +3798,8 @@ class HoldCourseView extends ItemView {
       ta.addEventListener('blur', () => {
         obj[key] = ta.value;
         this.plugin.save();
+        swallowNextClick = true;
+        setTimeout(() => { swallowNextClick = false; }, 0);
         showPreview();
       });
       ta.focus();
@@ -3808,9 +3818,10 @@ class HoldCourseView extends ItemView {
       } else {
         preview.setText(placeholder);
       }
-      // Let clicks on rendered links/checkboxes act normally instead of
-      // yanking the reader into edit mode.
       preview.addEventListener('click', (evt) => {
+        if (swallowNextClick) { swallowNextClick = false; return; }
+        // Let clicks on rendered links/checkboxes act normally instead of
+        // yanking the reader into edit mode.
         if (evt.target.closest('a, input')) return;
         showEditor();
       });
