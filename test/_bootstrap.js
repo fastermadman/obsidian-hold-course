@@ -39,6 +39,7 @@ const stub = {
   Menu: class {},
   Notice: class { constructor(message) { this.message = message; } },
   setIcon: () => {},
+  MarkdownRenderer: { render: async () => {} },
   FuzzySuggestModal: class {},
 };
 
