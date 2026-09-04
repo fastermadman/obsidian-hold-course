@@ -1241,6 +1241,18 @@
   color: var(--text-faint);
 }
 
+/* #5b Del B: teachers' lesson description — sync-owned, read-only next to the
+   editable notes below it. Flat (no border) so it reads as given, not typed. */
+.hc-lecture-description {
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.hc-lecture-description > :first-child { margin-top: 0; }
+.hc-lecture-description > :last-child { margin-bottom: 0; }
+
 /* --- Lecture assignments --------------------------------------------------- */
 
 .hc-lecture-assign-list {
@@ -3070,3 +3082,4 @@ body.hc-eink .hc-resource-source-icon {
   color: var(--text-muted);
   margin-top: 2px;
 }
+

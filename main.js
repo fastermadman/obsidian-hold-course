@@ -148,18 +148,21 @@ function sanitizeNoteFilename(name) {
 }
 
 // The initial contents of an auto-created note stub: hc_* frontmatter that
-// ties the file back to its resource (id survives a rename/move), an optional
+// ties the file back to its item (id survives a rename/move), an optional
 // wikilink to the source material, then any migrated data.json notes text.
-function buildNoteStub(resource, classCode, sourceLink) {
+// idKey picks which kind of item owns the file — resources and (#5b Del B)
+// lectures use the same stub shape, only the id field differs.
+function buildNoteStub(item, classCode, sourceLink, idKey = 'hc_resource_id') {
   const q = (v) => JSON.stringify(String(v));
-  const fm = ['---', `hc_resource_id: ${q(resource.id)}`, `hc_title: ${q(resource.title || '')}`];
-  if (resource.author) fm.push(`hc_author: ${q(resource.author)}`);
-  if (resource.type) fm.push(`hc_type: ${q(resource.type)}`);
+  const fm = ['---', `${idKey}: ${q(item.id)}`, `hc_title: ${q(item.title || '')}`];
+  if (item.author) fm.push(`hc_author: ${q(item.author)}`);
+  if (item.type) fm.push(`hc_type: ${q(item.type)}`);
+  if (item.date) fm.push(`hc_date: ${q(item.date)}`);
   if (classCode) fm.push(`hc_class: ${q(classCode)}`);
   fm.push('---', '');
   let out = fm.join('\n') + '\n';
   if (sourceLink) out += `Kilde: [[${sourceLink.replace(/\.md$/, '')}]]\n\n`;
-  const body = (resource.notes || '').trim();
+  const body = (item.notes || '').trim();
   if (body) out += body + '\n';
   return out;
 }
@@ -2662,15 +2665,20 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
+    // #5b Del B / viastudywiz#172: the teachers' `beskrivelse:` used to be
+    // written into lec.notes, which mixed their text with Valdemar's own and
+    // meant an emptied notes field got refilled on the next sync. It now has
+    // its own sync-owned field, shown read-only — the sync owns description,
+    // Valdemar owns notes, and neither clobbers the other.
+    if ((lec.description || '').trim()) {
+      content.createDiv({ cls: 'hc-lecture-section-label', text: 'Lesson Description' });
+      const desc = content.createDiv('hc-lecture-description');
+      MarkdownRenderer.render(this.app, lec.description, desc, lec.vaultLink || '', this);
+    }
+
     // Notes section
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Key Concepts & Lesson Goal' });
-    const textarea = content.createEl('textarea', { cls: 'hc-lecture-notes' });
-    textarea.value = lec.notes || '';
-    textarea.placeholder = 'Add notes, key concepts, or lesson goals…';
-    textarea.addEventListener('blur', () => {
-      lec.notes = textarea.value;
-      this.plugin.save();
-    });
+    this._renderLectureNote(content, lec, cls);
 
     // Vault link section
     content.createDiv({ cls: 'hc-lecture-section-label', text: 'Lecture Notes' });
@@ -4025,7 +4033,45 @@ class HoldCourseView extends ItemView {
       this._renderClickToEditNote(container, resource, 'notes', 'Add notes…');
       return;
     }
+    const cls = (sem.classes || []).find(c => (resource.classIds || []).includes(c.id));
+    this._renderFileNote(container, resource, {
+      idKey: 'hc_resource_id',
+      classCode: cls ? cls.code : '',
+      sourceLink: resource.vaultLink || '',
+      filename: resource.title,
+      placeholder: 'Add notes…',
+    });
+  }
 
+  // #5b Del B: lecture notes on the same file model. lec.vaultLink stays the
+  // sync-owned [NOTE] stub (it carries the preparation checkboxes), so it is
+  // the source link here, exactly like a resource's material note. The
+  // teacher's text no longer lives in lec.notes at all — viastudywiz#172 moved
+  // it to the sync-owned lec.description, rendered read-only above this.
+  _renderLectureNote(container, lec, cls) {
+    if (this.plugin.data.fileIsTruth !== true) {
+      const textarea = container.createEl('textarea', { cls: 'hc-lecture-notes' });
+      textarea.value = lec.notes || '';
+      textarea.placeholder = 'Add notes, key concepts, or lesson goals…';
+      textarea.addEventListener('blur', () => {
+        lec.notes = textarea.value;
+        this.plugin.save();
+      });
+      return;
+    }
+    this._renderFileNote(container, lec, {
+      idKey: 'hc_lecture_id',
+      classCode: cls ? cls.code : '',
+      sourceLink: lec.vaultLink || '',
+      filename: lec.date ? `${lec.date} ${lec.title}` : lec.title,
+      placeholder: 'Add notes, key concepts, or lesson goals…',
+    });
+  }
+
+  // The shared file-backed note widget. `spec` says which frontmatter id key
+  // owns the file, what to seed a new stub with, and what the empty state
+  // reads — everything else is identical for resources and lectures.
+  _renderFileNote(container, item, spec) {
     const wrap = container.createDiv('hc-note-edit');
     let swallowNextClick = false;
     const armSwallow = () => {
@@ -4037,7 +4083,7 @@ class HoldCourseView extends ItemView {
       wrap.empty();
       const ta = wrap.createEl('textarea', { cls: 'hc-lecture-notes' });
       ta.value = body;
-      ta.placeholder = 'Add notes…';
+      ta.placeholder = spec.placeholder;
       ta.addEventListener('blur', async () => {
         armSwallow();
         await this._writeNoteBody(file, ta.value);
@@ -4049,7 +4095,7 @@ class HoldCourseView extends ItemView {
 
     const render = async () => {
       wrap.empty();
-      const file = await this._resolveNoteFile(resource.notesLink || '');
+      const file = await this._resolveNoteFile(item.notesLink || '');
 
       // No file yet: click the placeholder to create the stub and drop into it.
       if (!file) {
@@ -4057,10 +4103,10 @@ class HoldCourseView extends ItemView {
           cls: 'hc-note-preview hc-note-preview--empty',
           attr: { 'aria-label': 'Click to create a note file' },
         });
-        preview.setText('Add notes…');
+        preview.setText(spec.placeholder);
         preview.addEventListener('click', async () => {
           if (swallowNextClick) { swallowNextClick = false; return; }
-          await this._createNoteStub(resource, sem);
+          await this._createNoteStub(item, spec);
           render();
         });
         return;
@@ -4069,16 +4115,16 @@ class HoldCourseView extends ItemView {
       let raw = '';
       try { raw = await this.app.vault.read(file); } catch (e) { raw = ''; }
       const body = splitFrontmatter(raw).body.trim();
-      const owned = this._ownsNoteFile(file, resource);
+      const owned = this._ownsNoteFile(file, item, spec.idKey);
 
       const preview = wrap.createDiv({
         cls: body ? 'hc-note-preview' : 'hc-note-preview hc-note-preview--empty',
         attr: { 'aria-label': owned ? 'Click to edit notes' : 'Open in Obsidian to edit' },
       });
       if (body) {
-        MarkdownRenderer.render(this.app, body, preview, resource.notesLink, this);
+        MarkdownRenderer.render(this.app, body, preview, item.notesLink, this);
       } else {
-        preview.setText('Add notes…');
+        preview.setText(spec.placeholder);
       }
 
       // Idempotency rule: Hold Course never writes a file it didn't create.
@@ -4118,12 +4164,12 @@ class HoldCourseView extends ItemView {
   }
 
   // ponytail: notesLink-path match is the session-1 truth (we're the only
-  // writer of that field). The frontmatter hc_resource_id check is the
-  // rename/move-proof path #5b session 2 leans on for re-matching.
-  _ownsNoteFile(file, resource) {
-    if (resource.notesLink && file && resource.notesLink === file.path) return true;
+  // writer of that field). The frontmatter id check (idKey) is the
+  // rename/move-proof path for re-matching a file the user moved.
+  _ownsNoteFile(file, item, idKey = 'hc_resource_id') {
+    if (item.notesLink && file && item.notesLink === file.path) return true;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    return !!fm && fm.hc_resource_id === resource.id;
+    return !!fm && fm[idKey] === item.id;
   }
 
   // #5b Del A read path: when the resource screen opens, pull hc_* values from
@@ -4147,20 +4193,19 @@ class HoldCourseView extends ItemView {
     });
   }
 
-  async _createNoteStub(resource, sem) {
+  async _createNoteStub(item, spec) {
     const folder = (this.plugin.data.notesFolder || 'HoldCourse/Books').replace(/^\/+|\/+$/g, '');
     if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
       try { await this.app.vault.createFolder(folder); } catch (e) { /* already there */ }
     }
-    const cls = (sem.classes || []).find(c => (resource.classIds || []).includes(c.id));
-    const base = sanitizeNoteFilename(resource.title);
+    const base = sanitizeNoteFilename(spec.filename);
     let path = folder ? `${folder}/${base}.md` : `${base}.md`;
     for (let n = 2; await this.app.vault.adapter.exists(path); n++) {
       path = folder ? `${folder}/${base} (${n}).md` : `${base} (${n}).md`;
     }
-    await this.app.vault.create(path, buildNoteStub(resource, cls ? cls.code : '', resource.vaultLink || ''));
-    resource.notesLink = path;
-    resource.notes = ''; // migrated into the file — file is truth now
+    await this.app.vault.create(path, buildNoteStub(item, spec.classCode, spec.sourceLink, spec.idKey));
+    item.notesLink = path;
+    item.notes = ''; // migrated into the file — file is truth now
     await this.plugin.save();
     return path;
   }

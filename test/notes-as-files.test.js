@@ -141,3 +141,30 @@ test('applyFrontmatterToResource: a missing or blank hc_ key leaves the JSON val
   assert.equal(resource.author, 'Keep');
   assert.equal(resource.type, 'Book');
 });
+
+// #5b Del B: the same stub shape backs lecture notes, keyed on hc_lecture_id.
+
+test('buildNoteStub: idKey picks which item owns the file', () => {
+  const out = buildNoteStub({ id: 'l1', title: 'Når børn synger' }, 'MUS', '', 'hc_lecture_id');
+  assert.match(out, /hc_lecture_id: "l1"/);
+  assert.doesNotMatch(out, /hc_resource_id/);
+  assert.match(out, /hc_title: "Når børn synger"/);
+  assert.match(out, /hc_class: "MUS"/);
+});
+
+test('buildNoteStub: a lecture date becomes hc_date, absent otherwise', () => {
+  assert.match(
+    buildNoteStub({ id: 'l1', title: 'T', date: '2026-09-10' }, '', '', 'hc_lecture_id'),
+    /hc_date: "2026-09-10"/,
+  );
+  assert.doesNotMatch(buildNoteStub({ id: 'r1', title: 'T' }, '', ''), /hc_date/);
+});
+
+test('buildNoteStub: an existing lecture note is migrated into the file body', () => {
+  const out = buildNoteStub(
+    { id: 'l1', title: 'T', notes: 'my prep notes' }, '', 'FAG/Musik/Uge 37/[NOTE] Lektion.md', 'hc_lecture_id',
+  );
+  const { body } = splitFrontmatter(out);
+  assert.match(body, /Kilde: \[\[FAG\/Musik\/Uge 37\/\[NOTE\] Lektion\]\]/);
+  assert.match(body, /my prep notes/);
+});
