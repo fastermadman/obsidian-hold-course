@@ -161,6 +161,14 @@
   container-type: inline-size;
 }
 
+/* Calendar's .hc-cal-root already fills this box (height: 100%) and sizes
+   its own grid to it, so the large bottom padding other views use for
+   comfortable end-of-scroll room just shows up as unused space beneath the
+   grid here — trimmed to match the top padding. */
+.hc-content--calendar {
+  padding-bottom: 20px;
+}
+
 /* --- Dashboard header ------------------------------------------------------ */
 
 .hc-dash-header {
@@ -2250,11 +2258,33 @@
 
 /* ─── Calendar ─────────────────────────────────────────────────────────────── */
 
+/* Fills .hc-content's box exactly so Month's grid can flex to the
+   remaining height below the header instead of always being tall enough to
+   force .hc-content's own overflow-y to scroll (see .hc-cal-grid--month). */
+.hc-cal-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Pinned to the top of .hc-content's scroll area (see main.js
+   _renderCalendarView) so the toggle/nav/legend stay visible while the grid
+   or agenda underneath scrolls. Background matches the pane so scrolled
+   content doesn't show through underneath it. */
+.hc-cal-sticky-header {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--background-primary);
+  padding-bottom: 2px;
+}
+
 .hc-cal-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   gap: 8px;
 }
 
@@ -2308,6 +2338,11 @@
 
 .hc-cal-nav-btn svg { width: 14px; height: 14px; }
 
+.hc-cal-nav-today {
+  font-size: 11px;
+  padding: 4px 9px;
+}
+
 .hc-cal-nav-title {
   font-size: 14px;
   font-weight: 500;
@@ -2338,6 +2373,34 @@
   text-align: center;
   padding: 7px 4px;
   background: var(--background-secondary);
+}
+
+/* Extra leading column for the ISO week number, one per week-row. */
+/* grid-template-columns/-rows are set inline in JS (_renderMonthGrid) —
+   column count depends on whether weekends are shown, row count on how many
+   week-rows the month needs, neither is a fixed constant. Header row stays
+   its natural height; the week-rows share whatever space is left in
+   .hc-cal-root, with 82px (the old fixed cell height) as a floor — so a
+   tall pane spreads the rows to fill it exactly (no scroll), and only a
+   pane too short for that floor triggers .hc-content's own overflow-y. */
+.hc-cal-grid--month {
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.hc-cal-weeknum-header {
+  background: var(--background-secondary);
+}
+
+.hc-cal-weeknum {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--background-primary);
+  padding: 0 6px;
 }
 
 /* ── Month cells ─────────────────────────────────────────────────────────── */
@@ -2586,8 +2649,8 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 12px;
-  padding: 7px 12px;
+  margin-bottom: 6px;
+  padding: 6px 12px;
   background: var(--background-secondary);
   border-radius: 6px;
   flex-wrap: wrap;
@@ -2607,12 +2670,20 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
+/* The legend is the filter — each dot/label below is a click target, not
+   just a color key, so it needs a pointer cursor and an "off" state. */
 .hc-cal-legend-item {
   display: flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+}
+
+.hc-cal-legend-item--off {
+  opacity: 0.35;
 }
 
 .hc-cal-legend-dot {
@@ -2635,25 +2706,8 @@
   flex-shrink: 0;
 }
 
-/* ── Filter bar ──────────────────────────────────────────────────────────── */
-
-.hc-cal-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--background-modifier-border);
-}
-
-.hc-cal-filter-label {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  flex-shrink: 0;
-}
-
+/* Reused by the Courses tab's assignment-type filter dropdown, not just the
+   (now removed) calendar filter bar — keep despite the "cal" prefix. */
 .hc-cal-filter-wrap {
   position: relative;
 }
