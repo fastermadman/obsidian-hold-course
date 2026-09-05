@@ -774,6 +774,27 @@ function cycleStatus(status) {
   return 'not-started';
 }
 
+// #51: one shape family for the 3 states, escalating mark, so it doesn't
+// fight #45's type icons when both sit in the same row. Parallel to
+// typeIcon()/renderTypeIcon(). Exams are two-state ('not-started'/'done').
+const STATUS_ICON = {
+  'not-started': 'circle',
+  'in-progress': 'circle-dashed',
+  'done':        'circle-check',
+};
+
+function statusIcon(status) {
+  return STATUS_ICON[status] || STATUS_ICON['not-started'];
+}
+
+// Prepends the status icon to an already-built status chip/button. The icon
+// inherits the chip's per-state colour via currentColor — no inline tint.
+function renderStatusIcon(el, status) {
+  const span = el.createSpan({ cls: 'hc-status-icon' });
+  setIcon(span, statusIcon(status));
+  el.prepend(span);
+}
+
 function formatDateLong(isoDate) {
   if (!isoDate) return '';
   const d = new Date(isoDate + 'T12:00:00');
@@ -3298,6 +3319,7 @@ class HoldCourseView extends ItemView {
 
     const statusEl = right.createDiv({ cls: `hc-lecture-status hc-lecture-status--${lec.status} hc-status-clickable` });
     statusEl.setText(statusLabel(lec.status));
+    renderStatusIcon(statusEl, lec.status);
     statusEl.setAttribute('aria-label', 'Click to change status');
     statusEl.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3367,6 +3389,7 @@ class HoldCourseView extends ItemView {
 
     const statusBtn = actionsRow.createEl('button', { cls: `hc-lecture-status-btn hc-lecture-status-btn--${lec.status}` });
     statusBtn.setText(statusLabel(lec.status));
+    renderStatusIcon(statusBtn, lec.status);
     statusBtn.addEventListener('click', () => {
       lec.status = cycleStatus(lec.status);
       this.plugin.save();
@@ -3780,6 +3803,7 @@ class HoldCourseView extends ItemView {
 
     const statusEl = right.createDiv({ cls: `hc-assign-status hc-assign-status--${assignment.status} hc-status-clickable` });
     statusEl.setText(statusLabel(assignment.status));
+    renderStatusIcon(statusEl, assignment.status);
     statusEl.setAttribute('aria-label', 'Click to change status');
     statusEl.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3939,6 +3963,7 @@ class HoldCourseView extends ItemView {
 
     const statusEl = right.createDiv({ cls: `hc-assign-status hc-assign-status--${assignment.status} hc-status-clickable` });
     statusEl.setText(statusLabel(assignment.status));
+    renderStatusIcon(statusEl, assignment.status);
     statusEl.setAttribute('aria-label', 'Click to change status');
     statusEl.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -4017,6 +4042,7 @@ class HoldCourseView extends ItemView {
 
     const statusBtn = actionsRow.createEl('button', { cls: `hc-lecture-status-btn hc-lecture-status-btn--${assignment.status}` });
     statusBtn.setText(statusLabel(assignment.status));
+    renderStatusIcon(statusBtn, assignment.status);
     statusBtn.addEventListener('click', () => {
       assignment.status = cycleStatus(assignment.status);
       this.plugin.save();
@@ -4335,6 +4361,7 @@ class HoldCourseView extends ItemView {
       cls: `hc-assign-status hc-assign-status--${exam.status === 'done' ? 'done' : 'not-started'} hc-status-clickable hc-exam-status`,
     });
     statusEl.setText(exam.status === 'done' ? 'Done' : 'Mark done');
+    renderStatusIcon(statusEl, exam.status === "done" ? "done" : "not-started");
     statusEl.setAttribute('aria-label', 'Click to change status');
     statusEl.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -4375,6 +4402,7 @@ class HoldCourseView extends ItemView {
       cls: `hc-lecture-status-btn hc-lecture-status-btn--${exam.status === 'done' ? 'done' : 'not-started'}`,
     });
     doneBtn.setText(exam.status === 'done' ? 'Done' : 'Mark done');
+    renderStatusIcon(doneBtn, exam.status === "done" ? "done" : "not-started");
     doneBtn.addEventListener('click', () => {
       exam.status = exam.status === 'done' ? 'not-started' : 'done';
       this.plugin.save();
@@ -5225,6 +5253,7 @@ class HoldCourseView extends ItemView {
 
       const statusEl = right.createDiv({ cls: `hc-assign-status hc-assign-status--${a.status} hc-status-clickable` });
       statusEl.setText(statusLabel(a.status));
+      renderStatusIcon(statusEl, a.status);
       statusEl.setAttribute('aria-label', 'Click to change status');
       statusEl.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -8391,6 +8420,8 @@ Object.assign(module.exports, {
   validateLectureTime,
   calLegendFilterPasses,
   typeIcon,
+  statusIcon,
+  cycleStatus,
   ASSIGNMENT_TYPES,
   isWeekendDate,
   getISOWeekNumber,

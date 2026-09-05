@@ -1055,6 +1055,9 @@
 
 .hc-lecture-status {
   font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .hc-lecture-status--done {
@@ -1202,6 +1205,9 @@
   font-family: inherit;
   font-weight: 500;
   transition: opacity 0.1s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .hc-lecture-status-btn:hover { opacity: 0.8; }
@@ -1507,8 +1513,13 @@
 
 .hc-assign-status {
   font-size: 12px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
+
+.hc-status-icon { display: inline-flex; }
+.hc-status-icon svg { width: 13px; height: 13px; }
 
 .hc-assign-status--not-started { color: var(--text-muted); }
 
