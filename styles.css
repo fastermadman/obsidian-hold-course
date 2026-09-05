@@ -2581,6 +2581,32 @@
   padding: 4px 9px;
 }
 
+/* ── #58 class-run colour rail ───────────────────────────────────────────── */
+/* A run of ≥2 adjacent same-class items (month pills, week pills, popover
+   rows) shares a left rail in the class accent colour so it reads as one
+   block. --hc-run-color is set inline per element. */
+.hc-cal-run {
+  border-left: 3px solid var(--hc-run-color);
+}
+/* Pills: square off the rail edge, collapse the inter-member gap, restore
+   rounding only at the run's outer ends. */
+.hc-cal-pill.hc-cal-run,
+.hc-cal-week-pill.hc-cal-run {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-bottom: 0;
+}
+.hc-cal-pill.hc-cal-run--last { margin-bottom: 2px; }
+.hc-cal-week-pill.hc-cal-run--last { margin-bottom: 4px; }
+/* Lecture pills are pill-shaped; a mid-run one would look odd fully rounded. */
+.hc-cal-pill--lecture.hc-cal-run,
+.hc-cal-week-pill--lecture.hc-cal-run {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+/* Popover rows are full-bleed; keep text left-edge aligned under the rail. */
+.hc-cal-popover-item.hc-cal-run { padding-left: 11px; }
+
 /* ── Popover ─────────────────────────────────────────────────────────────── */
 
 .hc-cal-popover {

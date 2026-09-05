@@ -1155,6 +1155,19 @@ function getCalItemStyle(item) {
   return { color: '#666', bg: '#F0F0F0' };
 }
 
+// #58 — a day's items already arrive class-grouped (getItemsForDate loops
+// classes outermost), so a run of ≥2 adjacent items sharing a class gets a
+// colour rail down its left edge to read as one block. Returns a parallel
+// array: null for a lone item, else 'first' | 'mid' | 'last' within its run.
+function markClassRuns(items) {
+  return items.map((it, i) => {
+    const sameP = i > 0 && items[i - 1].cls.id === it.cls.id;
+    const sameN = i < items.length - 1 && items[i + 1].cls.id === it.cls.id;
+    if (!sameP && !sameN) return null;
+    return !sameP ? 'first' : !sameN ? 'last' : 'mid';
+  });
+}
+
 // Calendar legend-as-filter predicate — module-level and pure so it can be
 // unit-tested without DOM (see test/_bootstrap.js). A class toggle gates
 // every item from that class; a type toggle additionally gates
@@ -5866,14 +5879,17 @@ class HoldCourseView extends ItemView {
         const maxPills = 3;
         const shown = items.slice(0, maxPills);
         const extra = items.length - maxPills;
+        const runs = markClassRuns(shown);
 
-        for (const item of shown) {
+        shown.forEach((item, idx) => {
           const style = getCalItemStyle(item);
           const overdue = this._isCalItemOverdue(item);
           const done    = this._isCalItemDone(item);
           let pillCls = 'hc-cal-pill';
           if (item.kind === 'lecture') pillCls += ' hc-cal-pill--lecture';
+          if (runs[idx]) pillCls += ` hc-cal-run hc-cal-run--${runs[idx]}`;
           const pill = cell.createDiv(pillCls);
+          if (runs[idx]) pill.style.setProperty('--hc-run-color', getColor(item.cls.colorIndex).accent);
           if (done) {
             pill.style.background = 'var(--background-modifier-border)';
             pill.style.color = 'var(--text-muted)';
@@ -5894,7 +5910,7 @@ class HoldCourseView extends ItemView {
             renderTypeIcon(pill, calItemTypeKey(item), 'hc-cal-pill-icon', iconColor);
           }
           pill.createSpan({ text: calItemDisplayTitle(item) });
-        }
+        });
 
         if (extra > 0) {
           cell.createDiv({ cls: 'hc-cal-more', text: `+${extra} more` });
@@ -5945,13 +5961,17 @@ class HoldCourseView extends ItemView {
         cell.addEventListener('click', () => this._showCalPopover(items, cell, dateISO));
       }
 
-      for (const item of items) {
+      const weekRuns = markClassRuns(items);
+
+      items.forEach((item, idx) => {
         const style = getCalItemStyle(item);
         const overdue = this._isCalItemOverdue(item);
         const done    = this._isCalItemDone(item);
         let weekPillCls = 'hc-cal-week-pill';
         if (item.kind === 'lecture') weekPillCls += ' hc-cal-week-pill--lecture';
+        if (weekRuns[idx]) weekPillCls += ` hc-cal-run hc-cal-run--${weekRuns[idx]}`;
         const pill = cell.createDiv(weekPillCls);
+        if (weekRuns[idx]) pill.style.setProperty('--hc-run-color', getColor(item.cls.colorIndex).accent);
         if (done) {
           pill.style.background = 'var(--background-modifier-border)';
           pill.style.color = 'var(--text-muted)';
@@ -5961,7 +5981,7 @@ class HoldCourseView extends ItemView {
           pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
         }
         pill.setText(calItemDisplayTitle(item));
-      }
+      });
     }
   }
 
@@ -6017,11 +6037,17 @@ class HoldCourseView extends ItemView {
 
     pop.createDiv({ cls: 'hc-cal-popover-date', text: formatDateLong(dateISO) });
 
-    for (const item of items) {
+    const popRuns = markClassRuns(items);
+
+    items.forEach((item, idx) => {
       const style = getCalItemStyle(item);
       const overdue = this._isCalItemOverdue(item);
       const row = pop.createDiv('hc-cal-popover-item');
       if (overdue) row.addClass('hc-cal-popover-item--overdue');
+      if (popRuns[idx]) {
+        row.addClass('hc-cal-run', `hc-cal-run--${popRuns[idx]}`);
+        row.style.setProperty('--hc-run-color', getColor(item.cls.colorIndex).accent);
+      }
 
       // #44: the row already carries a "Lecture/Exam/type" text label, so the
       // icon slot shows the class. Fallback when the class has no icon: the
@@ -6056,7 +6082,7 @@ class HoldCourseView extends ItemView {
         this._closeCalPopover();
         this._navigateCalItem(item);
       });
-    }
+    });
 
     this._calPopoverCloseHandler = (e) => {
       if (!pop.contains(e.target)) this._closeCalPopover();
@@ -8585,6 +8611,7 @@ Object.assign(module.exports, {
   getLectureProfessor,
   validateLectureTime,
   calLegendFilterPasses,
+  markClassRuns,
   typeIcon,
   statusIcon,
   cycleStatus,
