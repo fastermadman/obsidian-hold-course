@@ -99,6 +99,10 @@ const EINK_FILL_OVERRIDE = {
   green:  'color-mix(in srgb, var(--text-normal) 90%, transparent)',
 };
 let einkActive = false;
+// Manual override for time display — 'auto' keeps following the OS/Obsidian
+// locale (the previous, only behavior); '12h'/'24h' force it regardless of
+// locale, for e.g. an English-locale user who still wants 24h clocks.
+let timeFormatSetting = 'auto';
 
 // #9: getDueInfo()'s urgency colors used to be absolute hex darkened "while
 // still reading against a white page" — broke under Obsidian's dark theme
@@ -725,14 +729,19 @@ function formatDateLong(isoDate) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Stored as 24h "HH:MM"; displayed per locale. Anchored to an arbitrary date —
-// only the time-of-day portion is used.
+// Stored as 24h "HH:MM"; displayed per locale by default, or forced to
+// 12h/24h by the "Time format" setting (timeFormatSetting) regardless of
+// locale. Anchored to an arbitrary date — only the time-of-day portion is
+// used.
 function formatTimeShort(hhmm) {
   if (!hhmm) return '';
   const [h, m] = hhmm.split(':').map(Number);
   if (Number.isNaN(h) || Number.isNaN(m)) return '';
   const d = new Date(2000, 0, 1, h, m);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const opts = { hour: 'numeric', minute: '2-digit' };
+  if (timeFormatSetting === '24h') opts.hour12 = false;
+  if (timeFormatSetting === '12h') opts.hour12 = true;
+  return d.toLocaleTimeString([], opts);
 }
 
 function formatTimeRange(startHHMM, endHHMM) {
@@ -757,12 +766,14 @@ function to24h(hour12, minute, period) {
   return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-// Whether the OS/Obsidian locale's own convention is 24h, not 12h+AM/PM —
-// the same thing formatTimeShort()'s toLocaleTimeString([]) already follows
-// for DISPLAY. Asking Intl directly (rather than a plugin setting) keeps
-// the picker's format agreeing with how times are shown everywhere else,
-// with no new configurability nobody asked for.
+// Whether the time picker should show a 24h dial or 12h+AM/PM — follows the
+// "Time format" setting when set, otherwise the OS/Obsidian locale's own
+// convention (same thing formatTimeShort()'s toLocaleTimeString() follows
+// for display), so the picker always agrees with how times are shown
+// everywhere else.
 function uses24hFormat() {
+  if (timeFormatSetting === '24h') return true;
+  if (timeFormatSetting === '12h') return false;
   return new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 === false;
 }
 
@@ -876,6 +887,14 @@ function getWeekStartISO(dateISO) {
   const d = new Date(dateISO + 'T12:00:00');
   const daysBack = (d.getDay() + 6) % 7; // Mon = 0
   return addDaysISO(dateISO, -daysBack);
+}
+
+// #21 comment (2026-09-05) — Week's smart weekend default: an empty
+// Saturday/Sunday is skipped rather than shown, but only when it's actually
+// empty (getDay(): 0 = Sunday, 6 = Saturday).
+function isWeekendDate(d) {
+  const day = d.getDay();
+  return day === 0 || day === 6;
 }
 
 // A class meets today by its recurring schedule only when every one of these
@@ -1007,6 +1026,7 @@ function normalizeSettings(obj, defaultScale) {
   return {
     einkMode: s.einkMode === true,
     mobileScale: typeof s.mobileScale === 'number' ? s.mobileScale : defaultScale,
+    timeFormat: ['auto', '12h', '24h'].includes(s.timeFormat) ? s.timeFormat : 'auto',
   };
 }
 
@@ -1029,6 +1049,7 @@ class HoldCoursePlugin extends Plugin {
 
     this.applyEinkClass();
     this.applyMobileScale();
+    this.applyTimeFormat();
 
     this.addSettingTab(new HoldCourseSettingTab(this.app, this));
 
@@ -1154,6 +1175,10 @@ class HoldCoursePlugin extends Plugin {
   applyEinkClass() {
     einkActive = this.settings.einkMode;
     document.body.classList.toggle('hc-eink', einkActive);
+  }
+
+  applyTimeFormat() {
+    timeFormatSetting = this.settings.timeFormat;
   }
 
   applyMobileScale() {
@@ -1756,6 +1781,21 @@ class HoldCourseSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
+    new Setting(containerEl)
+      .setName('Time format')
+      .setDesc('How lecture/meeting times are displayed. "Match system" follows your OS/Obsidian locale (e.g. English usually means AM/PM) — override it here if you want 24h regardless of locale, or vice versa.')
+      .addDropdown((dropdown) => dropdown
+        .addOption('auto', 'Match system')
+        .addOption('24h', '24-hour')
+        .addOption('12h', '12-hour (AM/PM)')
+        .setValue(this.plugin.settings.timeFormat)
+        .onChange(async (value) => {
+          this.plugin.settings.timeFormat = value;
+          this.plugin.applyTimeFormat();
+          this.plugin.refreshAllViews();
+          await this.plugin.saveSettings();
+        }));
+
     const scaleSetting = new Setting(containerEl)
       .setName('Hold Course view size')
       .setDesc('Scales the Hold Course panel — text, spacing and icons together — up or down in 10% steps. Applies on this device only.');
@@ -1883,10 +1923,10 @@ class HoldCourseView extends ItemView {
     this.coursesSortKey = 'semester';
     this.coursesSortDir = 'desc';
     // Calendar session state
-    this.calView = 'month'; // 'month' | '3day' | 'week'
+    this.calView = 'month'; // 'month' | 'week'
     this.calYear = null;
     this.calMonth = null;
-    this.calAgendaStart = null; // ISO; anchors 3day/week, lazily set to today
+    this.calAgendaStart = null; // ISO; anchors week, lazily set to today
     this.calFilterClassIds = null; // lazily populated: { classId: true }, default all-on
     this.calFilterTypes = null;    // lazily populated: { 'Reading': true, ... }, default all-on
     // Track open dropdown cleanup
@@ -5442,19 +5482,22 @@ class HoldCourseView extends ItemView {
     if (!this.calAgendaStart)   this.calAgendaStart = getTodayISO();
     this._ensureCalFilterDefaults(sem);
 
+    // ── Sticky header (controls + legend) ───────────────────────────────────
+    // Pinned to the top of .hc-content's own scroll area so nav/filters stay
+    // put while the grid/agenda underneath scrolls — requested since a busy
+    // month or week otherwise scrolls the toggle/nav/legend out of view too.
+    const stickyHeader = content.createDiv('hc-cal-sticky-header');
+
     // ── Controls row ──────────────────────────────────────────────────────────
-    const controls = content.createDiv('hc-cal-controls');
+    const controls = stickyHeader.createDiv('hc-cal-controls');
 
     const toggle = controls.createDiv('hc-cal-view-toggle');
     const monthBtn = toggle.createEl('button', { cls: 'hc-cal-toggle-btn', text: 'Month' });
     if (this.calView === 'month') monthBtn.addClass('hc-cal-toggle-btn--active');
     const weekBtn = toggle.createEl('button', { cls: 'hc-cal-toggle-btn', text: 'Week' });
     if (this.calView === 'week') weekBtn.addClass('hc-cal-toggle-btn--active');
-    const threeDayBtn = toggle.createEl('button', { cls: 'hc-cal-toggle-btn', text: '3-Day' });
-    if (this.calView === '3day') threeDayBtn.addClass('hc-cal-toggle-btn--active');
-    monthBtn.addEventListener('click',    () => { this.calView = 'month'; this.render(); });
-    threeDayBtn.addEventListener('click', () => { this.calView = '3day';  this.render(); });
-    weekBtn.addEventListener('click',     () => { this.calView = 'week';  this.render(); });
+    monthBtn.addEventListener('click', () => { this.calView = 'month'; this.render(); });
+    weekBtn.addEventListener('click',  () => { this.calView = 'week';  this.render(); });
 
     const nav = controls.createDiv('hc-cal-nav');
     const prevBtn = nav.createEl('button', { cls: 'hc-cal-nav-btn' });
@@ -5478,13 +5521,17 @@ class HoldCourseView extends ItemView {
         if (this.calMonth > 11) { this.calMonth = 0; this.calYear++; }
         this.render();
       });
-      this._renderCalLegend(content, sem);
+      this._renderCalLegend(stickyHeader, sem);
       this._renderMonthGrid(content, sem);
     } else {
       // Week is a 7-day agenda anchored on today, not a Monday-start grid —
-      // both modes page by 1 day so "starts at today" keeps holding as you
-      // move forward/back, not just on first open.
-      const dayCount = this.calView === '3day' ? 3 : 7;
+      // pages by 1 day so "starts at today" keeps holding as you move
+      // forward/back, not just on first open. (A 3-Day option and a
+      // horizontal-grid layout toggle were both tried and dropped — see
+      // #21: weekend auto-hide already gives the vertical agenda enough
+      // room that neither pulled its weight, and 3-Day in particular broke
+      // outright once a weekend could eat 2 of its 3 days.)
+      const dayCount = 7;
       const endISO = addDaysISO(this.calAgendaStart, dayCount - 1);
       const start = new Date(this.calAgendaStart + 'T12:00:00');
       const end   = new Date(endISO + 'T12:00:00');
@@ -5492,7 +5539,7 @@ class HoldCourseView extends ItemView {
       titleEl.setText(`${fmt(start)} – ${fmt(end)}`);
       prevBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart, -1); this.render(); });
       nextBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart,  1); this.render(); });
-      this._renderCalLegend(content, sem);
+      this._renderCalLegend(stickyHeader, sem);
       this._renderAgendaList(content, sem, dayCount);
     }
   }
@@ -5629,23 +5676,29 @@ class HoldCourseView extends ItemView {
     }
   }
 
-  // 3-Day and Week are the same renderer, just a different day count — both
-  // a vertical, today-first, one-day-at-a-time rolling agenda instead of the
+  // Week is a today-first, one-day-at-a-time rolling agenda instead of the
   // old Monday-anchored week grid. Each day gets a fixed-height box (rather
   // than growing with item count) so the boxes stay visually uniform
   // regardless of how much is scheduled on any one day; an unusually busy
-  // day scrolls internally instead of stretching the whole list.
+  // day scrolls internally instead of stretching the list.
   _renderAgendaList(content, sem, dayCount) {
     const todayISO = getTodayISO();
     const root = content.createDiv('hc-cal-agenda');
 
     for (let i = 0; i < dayCount; i++) {
       const dateISO = addDaysISO(this.calAgendaStart, i);
+      const d = new Date(dateISO + 'T12:00:00');
       const isToday = dateISO === todayISO;
       const items = this._applyCalLegendFilter(getItemsForDate(sem, dateISO, null));
 
+      // #21 comment (2026-09-05): an empty weekend day is skipped outright
+      // rather than shown as its own "nothing here" box — most classes never
+      // meet weekends, so it's dead space most weeks. A weekend day WITH
+      // something on it (a rescheduled lecture, a Saturday due date) still
+      // shows normally. No toggle: this just shrinks the list that week.
+      if (isWeekendDate(d) && items.length === 0) continue;
+
       const section = root.createDiv('hc-today-section hc-cal-agenda-day');
-      const d = new Date(dateISO + 'T12:00:00');
       const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
         + (isToday ? ' · Today' : '');
       const labelEl = section.createDiv({ cls: 'hc-today-section-label', text: label });
@@ -8238,6 +8291,7 @@ Object.assign(module.exports, {
   getLectureProfessor,
   validateLectureTime,
   calLegendFilterPasses,
+  isWeekendDate,
 });
 
 /* nosourcemap */

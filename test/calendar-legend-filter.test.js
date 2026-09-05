@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calLegendFilterPasses } = require('./_bootstrap.js');
+const { calLegendFilterPasses, isWeekendDate } = require('./_bootstrap.js');
 
 const CLS_A = { id: 'a' };
 const CLS_B = { id: 'b' };
@@ -37,4 +37,12 @@ test('exam items are gated by the "Exam" type toggle, not a kind toggle', () => 
 test('lecture items only need the class check — no type gate applies', () => {
   const classesOn = { a: true };
   assert.equal(calLegendFilterPasses(lecture(CLS_A), classesOn, {}), true);
+});
+
+test('isWeekendDate — Saturday and Sunday only', () => {
+  // 2026-09-05 is a Saturday, 2026-09-06 a Sunday, 2026-09-07 a Monday.
+  assert.equal(isWeekendDate(new Date('2026-09-05T12:00:00')), true);
+  assert.equal(isWeekendDate(new Date('2026-09-06T12:00:00')), true);
+  assert.equal(isWeekendDate(new Date('2026-09-07T12:00:00')), false);
+  assert.equal(isWeekendDate(new Date('2026-09-04T12:00:00')), false); // Friday
 });

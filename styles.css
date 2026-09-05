@@ -2250,6 +2250,18 @@
 
 /* ─── Calendar ─────────────────────────────────────────────────────────────── */
 
+/* Pinned to the top of .hc-content's scroll area (see main.js
+   _renderCalendarView) so the toggle/nav/legend stay visible while the grid
+   or agenda underneath scrolls. Background matches the pane so scrolled
+   content doesn't show through underneath it. */
+.hc-cal-sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--background-primary);
+  padding-bottom: 2px;
+}
+
 .hc-cal-controls {
   display: flex;
   align-items: center;
@@ -2275,6 +2287,8 @@
   color: var(--text-muted);
   font-family: inherit;
   transition: background 0.1s, color 0.1s;
+  display: flex;
+  align-items: center;
 }
 
 .hc-cal-toggle-btn--active {
@@ -2560,7 +2574,7 @@
   flex-shrink: 0;
 }
 
-/* ── 3-Day / Week agenda ─────────────────────────────────────────────────── */
+/* ── Week agenda ─────────────────────────────────────────────────────────── */
 /* Vertical, today-first day list (#21) — reuses the sidebar Today view's
    .hc-today-section/.hc-today-item/.hc-today-pill rules for each day's
    content, but wraps them in its own container so it doesn't inherit that
@@ -2578,6 +2592,10 @@
 .hc-cal-agenda-day {
   max-height: 220px;
   overflow-y: auto;
+  /* Flex items default to min-height:auto, which lets a day with a lot of
+     items grow past max-height instead of scrolling internally — this is
+     the standard fix (min-height:0 lets max-height actually win). */
+  min-height: 0;
 }
 
 .hc-cal-agenda-day-label--today {
