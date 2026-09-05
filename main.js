@@ -3027,15 +3027,21 @@ class HoldCourseView extends ItemView {
 
     body.createDiv('hc-class-divider');
 
-    // Next assignment
+    // Next assignment — #56: this block names a specific assignment, so it
+    // opens that assignment, not the class the rest of the card opens.
     if (next) {
       const info = getDueInfo(next.dueDate);
-      body.createDiv({ cls: 'hc-class-next-label', text: 'Next assignment due' });
-      body.createDiv({ cls: 'hc-class-next-title', text: next.title });
+      const nextBlock = body.createDiv('hc-class-next hc-class-next--clickable');
+      nextBlock.createDiv({ cls: 'hc-class-next-label', text: 'Next assignment due' });
+      nextBlock.createDiv({ cls: 'hc-class-next-title', text: next.title });
       if (info) {
-        const dueEl = body.createDiv({ cls: 'hc-class-next-due', text: info.label });
+        const dueEl = nextBlock.createDiv({ cls: 'hc-class-next-due', text: info.label });
         dueEl.style.color = info.color;
       }
+      nextBlock.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.navigate('assignment', cls.id, null, next.id);
+      });
     } else {
       body.createDiv({ cls: 'hc-class-next-label', text: 'No assignments due' });
       body.createDiv({ cls: 'hc-class-next-title', text: '—' });

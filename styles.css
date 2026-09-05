@@ -483,6 +483,18 @@
   margin-bottom: 8px;
 }
 
+/* #56: the next-assignment block opens that assignment, not the class —
+   its own hover so the two click zones read as distinct. */
+.hc-class-next--clickable {
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.hc-class-next--clickable:hover {
+  background: var(--background-modifier-hover);
+}
+
 .hc-class-next-label {
   font-size: 11px;
   color: var(--text-faint);
