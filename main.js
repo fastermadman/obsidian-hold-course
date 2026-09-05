@@ -3099,8 +3099,17 @@ class HoldCourseView extends ItemView {
     // lecture, not graded work, and mixing the two made the Assignments tab
     // read like a to-do list instead of "what's due and graded." (LiveAQuietLife, 2026-09-01)
     const tabs = ['Lectures', 'Assignments', 'Readings', 'Exams', 'Library'];
+    // Readings/Exams/Lectures reuse #45's type icons so the two systems stay
+    // consistent; Assignments matches the nav bar's own 'list' icon.
+    const tabIcons = {
+      Lectures: 'presentation', Assignments: 'list', Readings: 'book-open',
+      Exams: 'file-check', Library: 'library-big',
+    };
     for (const tab of tabs) {
-      const btn = tabRow.createEl('button', { cls: 'hc-tab', text: tab });
+      const btn = tabRow.createEl('button', { cls: 'hc-tab' });
+      const tabIcon = btn.createSpan({ cls: 'hc-tab-icon' });
+      setIcon(tabIcon, tabIcons[tab]);
+      btn.createSpan({ text: tab });
       if (tab === this.currentTab) {
         btn.addClass('hc-tab--active');
         btn.style.color = accentText(color);
