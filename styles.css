@@ -2266,7 +2266,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   gap: 8px;
 }
 
@@ -2352,6 +2352,25 @@
   text-align: center;
   padding: 7px 4px;
   background: var(--background-secondary);
+}
+
+/* Extra leading column for the ISO week number, one per week-row. */
+.hc-cal-grid--month {
+  grid-template-columns: auto repeat(7, 1fr);
+}
+
+.hc-cal-weeknum-header {
+  background: var(--background-secondary);
+}
+
+.hc-cal-weeknum {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--background-primary);
+  padding: 0 6px;
 }
 
 /* ── Month cells ─────────────────────────────────────────────────────────── */
@@ -2517,8 +2536,8 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 12px;
-  padding: 7px 12px;
+  margin-bottom: 6px;
+  padding: 6px 12px;
   background: var(--background-secondary);
   border-radius: 6px;
   flex-wrap: wrap;

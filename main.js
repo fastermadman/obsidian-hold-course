@@ -889,6 +889,18 @@ function getWeekStartISO(dateISO) {
   return addDaysISO(dateISO, -daysBack);
 }
 
+// ISO-8601 week number: week 1 is the week containing the year's first
+// Thursday (equivalently, the Monday-start week containing Jan 4th).
+function getISOWeekNumber(dateISO) {
+  const d = new Date(dateISO + 'T12:00:00');
+  const dayNum = (d.getDay() + 6) % 7; // Mon = 0
+  d.setDate(d.getDate() - dayNum + 3); // nearest Thursday
+  const firstThursday = new Date(d.getFullYear(), 0, 4);
+  const firstThursdayDayNum = (firstThursday.getDay() + 6) % 7;
+  firstThursday.setDate(firstThursday.getDate() - firstThursdayDayNum + 3);
+  return 1 + Math.round((d - firstThursday) / (7 * 86400000));
+}
+
 // #21 comment (2026-09-05) — Week's smart weekend default: an empty
 // Saturday/Sunday is skipped rather than shown, but only when it's actually
 // empty (getDay(): 0 = Sunday, 6 = Saturday).
@@ -5536,9 +5548,13 @@ class HoldCourseView extends ItemView {
       const start = new Date(this.calAgendaStart + 'T12:00:00');
       const end   = new Date(endISO + 'T12:00:00');
       const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      titleEl.setText(`${fmt(start)} – ${fmt(end)}`);
-      prevBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart, -1); this.render(); });
-      nextBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart,  1); this.render(); });
+      titleEl.setText(`${fmt(start)} – ${fmt(end)} · W${getISOWeekNumber(this.calAgendaStart)}`);
+      // Pages by a full week (not 1 day, as in the 3-Day-era design) since
+      // Week is now the only agenda mode — next/prev matches "next/prev
+      // week" expectations. Only the increment changed; first load still
+      // anchors on today (see calAgendaStart init above).
+      prevBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart, -dayCount); this.render(); });
+      nextBtn.addEventListener('click', () => { this.calAgendaStart = addDaysISO(this.calAgendaStart,  dayCount); this.render(); });
       this._renderCalLegend(stickyHeader, sem);
       this._renderAgendaList(content, sem, dayCount);
     }
@@ -5622,8 +5638,9 @@ class HoldCourseView extends ItemView {
     const startOffset = (firstD.getDay() + 6) % 7;
     const gridStartISO = addDaysISO(firstISO, -startOffset);
 
-    const grid = content.createDiv('hc-cal-grid');
+    const grid = content.createDiv('hc-cal-grid hc-cal-grid--month');
 
+    grid.createDiv('hc-cal-weeknum-header');
     for (const d of ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']) {
       grid.createDiv({ cls: 'hc-cal-day-header', text: d });
     }
@@ -5634,6 +5651,10 @@ class HoldCourseView extends ItemView {
       const inMonth = d.getMonth() === this.calMonth && d.getFullYear() === this.calYear;
       const isToday = dateISO === todayISO;
       const items   = this._applyCalLegendFilter(getItemsForDate(sem, dateISO, null));
+
+      if (i % 7 === 0) {
+        grid.createDiv({ cls: 'hc-cal-weeknum', text: String(getISOWeekNumber(dateISO)) });
+      }
 
       const cell = grid.createDiv('hc-cal-cell');
       if (isToday)  cell.addClass('hc-cal-cell--today');
@@ -8292,6 +8313,7 @@ Object.assign(module.exports, {
   validateLectureTime,
   calLegendFilterPasses,
   isWeekendDate,
+  getISOWeekNumber,
 });
 
 /* nosourcemap */
