@@ -487,6 +487,24 @@ function getAllAssignments(semester) {
   return all;
 }
 
+// #57: the dashboard "deadline radar" (Overdue / Due today / Coming up) shows
+// every not-done item with a real due date — assignments, readings AND exams.
+// Lectures are excluded on purpose: a lecture is a scheduled event, not a
+// deadline; the calendar owns events. `kind` routes each row's click to the
+// right detail screen.
+function getAllDeadlineItems(semester) {
+  const all = getAllAssignments(semester).map(a => ({ ...a, kind: 'assignment' }));
+  for (const cls of (semester.classes || [])) {
+    for (const e of (cls.exams || [])) {
+      all.push({
+        ...e, kind: 'exam',
+        classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon,
+      });
+    }
+  }
+  return all;
+}
+
 // getAbstractFileByPath only checks Obsidian's in-memory vault index. On
 // mobile that index can lag behind disk after a sync tool (e.g. Syncthing)
 // writes a file — the note is real but not indexed yet, so the lookup
@@ -2865,29 +2883,37 @@ class HoldCourseView extends ItemView {
   _renderTodayStrip(content, sem) {
     const today = getTodayISO();
 
-    const dueToday = getAllAssignments(sem)
-      .filter(a => a.status !== 'done' && a.dueDate === today)
+    // #57: assignments + readings + exams; never lectures. Caps stay at 5 —
+    // exams are few, so the mix doesn't warrant a bigger list or a collapse.
+    const items = getAllDeadlineItems(sem).filter(a => a.status !== 'done' && a.dueDate);
+
+    const dueToday = items
+      .filter(a => a.dueDate === today)
       .sort((a, b) => a.title.localeCompare(b.title));
 
-    const comingUp = getAllAssignments(sem)
-      .filter(a => a.status !== 'done' && a.dueDate && a.dueDate > today)
+    const comingUp = items
+      .filter(a => a.dueDate > today)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
       .slice(0, 5);
 
-    const overdue = getAllAssignments(sem)
-      .filter(a => a.status !== 'done' && a.dueDate && a.dueDate < today)
+    const overdue = items
+      .filter(a => a.dueDate < today)
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
     const strip = content.createDiv('hc-today-strip');
 
     // #44: urgency lives on the column now (top rule + tinted label), not on a
-    // per-row dot — so the row's leading mark can be the class icon without two
-    // colour meanings fighting. No icon set on a class → row is just text.
+    // per-row dot. #57: mixed-class item context → [class][type] — the type
+    // icon tells a reading from a hand-in from an exam at a glance.
     const addRow = (col, a, withDate) => {
       const row = col.createDiv('hc-today-row hc-today-row--clickable');
       renderClassIcon(row, { icon: a.classIcon, colorIndex: a.colorIndex }, { extraCls: 'hc-today-row-icon' });
+      renderTypeIcon(row, a.kind === 'exam' ? 'Exam' : (a.type || 'Other'), 'hc-today-row-icon');
       row.createSpan({ text: withDate ? `${a.title} · ${formatDate(a.dueDate)}` : a.title });
-      row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
+      row.addEventListener('click', () => {
+        if (a.kind === 'exam') this.navigate('exam', a.classId, null, null, a.id);
+        else this.navigate('assignment', a.classId, a.lectureId || null, a.id);
+      });
     };
 
     // Overdue — only rendered when something is actually overdue
@@ -8546,6 +8572,7 @@ Object.assign(module.exports, {
   openVaultNote,
   ConfirmReloadModal,
   getGlobalAssignments,
+  getAllDeadlineItems,
   HoldCourseView,
   normalizeSettings,
   splitFrontmatter,

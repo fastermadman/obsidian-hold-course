@@ -3328,6 +3328,7 @@ body.hc-eink .hc-resource-source-icon {
 .hc-today-label--soon    { color: #3B6D11; }
 .hc-today-row-icon svg { width: 13px; height: 13px; }
 .hc-today-row-icon.hc-class-icon--literal { font-size: 13px; }
+.hc-today-row-icon + .hc-today-row-icon { margin-left: -3px; }
 
 /* Class icon picker rows. */
 .hc-icon-suggestion { display: flex; align-items: center; gap: 10px; }
