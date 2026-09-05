@@ -6,6 +6,18 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  /* Obsidian's own app.css sets `user-select: none` on <body> and opts back
+     in only for [contenteditable] and its own reading-view content — a
+     plain ItemView like this one never gets that opt-in for free, so
+     without this override nothing anywhere in HC is selectable (class
+     code, dates, descriptions, everything). Same override Obsidian's own
+     .markdown-preview-view uses. On .hc-root rather than just .hc-content
+     so it also covers the breadcrumb/toolbar in the header. The handful of
+     decorative user-select:none rules elsewhere (.hc-bc-sep, drag bars,
+     sort headers) still win on their own elements — a rule targeting an
+     element directly always beats an inherited value from an ancestor. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* --- Toolbar --------------------------------------------------------------- */
@@ -2631,6 +2643,13 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* Same user-select override as .hc-root, and for the same reason it has
+     to be repeated here rather than inherited: this is a sibling container
+     of .hc-root, not a child of it (HoldCourseTodayView.render(), not
+     HoldCourseView.render()) — the #10 eink-CSS fix hit this exact gap
+     before. */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .hc-today-section {
