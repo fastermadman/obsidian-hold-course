@@ -1156,6 +1156,19 @@
   margin-bottom: 20px;
 }
 
+/* #41 — applied instead of the default margin above only when a meta line
+   (time/location/instructor) actually follows, so a plain lecture with
+   none of those keeps its original spacing before the actions row. */
+.hc-lecture-detail-date--tight {
+  margin-bottom: 4px;
+}
+
+.hc-lecture-detail-meta {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
 .hc-lecture-detail-actions {
   display: flex;
   align-items: center;
@@ -2034,6 +2047,16 @@
   border-radius: 6px;
   padding: 7px 10px;
   margin: 0 0 10px 0;
+  line-height: 1.4;
+}
+
+/* #41 — plain explanatory text under an optional/override field, not a
+   warning (no border/background) — e.g. "leave as-is to inherit the
+   class's time". */
+.hc-modal-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: -6px 0 12px 0;
   line-height: 1.4;
 }
 
