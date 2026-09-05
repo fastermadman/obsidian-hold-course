@@ -324,6 +324,57 @@ function typeText(style) {
   return isDarkTheme() ? (style.colorDark || style.color) : style.color;
 }
 
+// #45: one Lucide icon per assignment type, so types are told apart by shape
+// (readable at a glance, and still distinct on e-ink where #9's colour
+// approximation is weak). 'Other' keeps a plain neutral circle on purpose
+// rather than a stretched metaphor. Exam/Quiz are here too because
+// getCalItemStyle() resolves them through getTypeStyle().
+const ASSIGNMENT_TYPE_ICON = {
+  'Reading':    'book-open',
+  'Writing':    'pen-line',
+  'Project':    'folder',
+  'Discussion': 'messages-square',
+  'Quiz':       'list-checks',
+  'Exam':       'file-check',
+  'Lecture':    'presentation',
+  'Other':      'circle',
+};
+
+function typeIcon(type) {
+  return ASSIGNMENT_TYPE_ICON[type] || ASSIGNMENT_TYPE_ICON['Other'];
+}
+
+// The type key a calendar item shows its icon for — lecture and exam are
+// their own item kinds, assignments carry a type field.
+function calItemTypeKey(item) {
+  if (item.kind === 'lecture') return 'Lecture';
+  if (item.kind === 'exam')    return 'Exam';
+  return item.assignment.type || 'Other';
+}
+
+// Shared type-icon renderer — every surface that shows a type (rows, pills,
+// calendar legend/popover, filter dropdowns) goes through this, mirroring how
+// getTypeStyle() is the single colour lookup. Icon is tinted with the type's
+// own colour to keep the association users already built up.
+function renderTypeIcon(parent, type, extraCls, colorOverride) {
+  const span = parent.createSpan({ cls: extraCls ? `hc-type-icon ${extraCls}` : 'hc-type-icon' });
+  setIcon(span, typeIcon(type));
+  span.style.color = colorOverride || typeText(getTypeStyle(type));
+  return span;
+}
+
+// The type pill (icon + label on a tinted background) as drawn in assignment
+// rows and the assignment detail header.
+function renderTypePill(parent, type, opts = {}) {
+  const style = getTypeStyle(type);
+  const pill = parent.createSpan({ cls: opts.lg ? 'hc-assign-pill hc-assign-pill--lg' : 'hc-assign-pill' });
+  renderTypeIcon(pill, type);
+  pill.createSpan({ text: type || 'Other' });
+  pill.style.color = style.color;
+  pill.style.background = style.bg;
+  return pill;
+}
+
 function getTodayISO() {
   const d = new Date();
   return makeISO(d.getFullYear(), d.getMonth() + 1, d.getDate());
@@ -3515,7 +3566,9 @@ class HoldCourseView extends ItemView {
       const aRow = container.createDiv('hc-lecture-assign-row hc-lecture-assign-row--clickable');
       aRow.addEventListener('click', () => this.navigate('assignment', cls.id, lec.id, a.id));
       if (a.type) {
-        aRow.createSpan({ cls: 'hc-assign-type-pill', text: a.type });
+        const typePill = aRow.createSpan({ cls: 'hc-assign-type-pill' });
+        renderTypeIcon(typePill, a.type);
+        typePill.createSpan({ text: a.type });
       }
       const aInfo = aRow.createDiv('hc-lecture-assign-info');
       aInfo.createDiv({ cls: 'hc-lecture-assign-title', text: a.title });
@@ -3644,9 +3697,9 @@ class HoldCourseView extends ItemView {
         if (type === this.classAssignFilterType) item.addClass('hc-sem-drop-item--active');
         const icon = item.createSpan({ cls: 'hc-sem-drop-icon' });
         if (type === this.classAssignFilterType) setIcon(icon, 'check');
-        const style = getTypeStyle(type);
+        renderTypeIcon(item, type);
         const lbl = item.createSpan({ text: type });
-        lbl.style.color = typeText(style);
+        lbl.style.color = typeText(getTypeStyle(type));
         item.addEventListener('click', () => { this.classAssignFilterType = type; closeTypeDrop(); this.render(); });
       }
 
@@ -3684,7 +3737,6 @@ class HoldCourseView extends ItemView {
   }
 
   _renderAssignmentRow(container, assignment, lectureLabel, sem, cls) {
-    const typeStyle = getTypeStyle(assignment.type);
     const info = assignment.dueDate ? getDueInfo(assignment.dueDate) : null;
 
     const row = container.createDiv('hc-assign-row');
@@ -3692,9 +3744,7 @@ class HoldCourseView extends ItemView {
     if (assignment.type === 'Writing') row.addClass('hc-assign-row--writing');
 
     // Left: type pill
-    const pill = row.createSpan({ cls: 'hc-assign-pill', text: assignment.type || 'Other' });
-    pill.style.color = typeStyle.color;
-    pill.style.background = typeStyle.bg;
+    renderTypePill(row, assignment.type);
 
     // Middle: title, lecture, grade (once done)
     const mid = row.createDiv('hc-assign-mid');
@@ -3918,8 +3968,6 @@ class HoldCourseView extends ItemView {
 
     const { assignment, lectureId } = result;
     const color = getColor(cls.colorIndex);
-    const typeStyle = getTypeStyle(assignment.type);
-
     // Back button and prev/next: rendered once, uniformly, by _renderSubheader.
     // This screen's back button used to be hand-built here as a 3-way branch
     // on previousScreen (All Assignments / the originating lecture / the
@@ -3928,9 +3976,7 @@ class HoldCourseView extends ItemView {
 
     // Type pill + title
     const titleRow = content.createDiv('hc-assign-detail-title-row');
-    const pill = titleRow.createSpan({ cls: 'hc-assign-pill hc-assign-pill--lg', text: assignment.type || 'Other' });
-    pill.style.color = typeStyle.color;
-    pill.style.background = typeStyle.bg;
+    renderTypePill(titleRow, assignment.type, { lg: true });
 
     content.createDiv({ cls: 'hc-lecture-detail-title', text: assignment.title });
 
@@ -5066,13 +5112,13 @@ class HoldCourseView extends ItemView {
       typeDropEl.createDiv('hc-sem-drop-divider');
 
       for (const type of ASSIGNMENT_TYPES) {
-        const typeStyle = getTypeStyle(type);
         const item = typeDropEl.createDiv('hc-sem-drop-item');
         if (type === this.globalAssignFilterType) item.addClass('hc-sem-drop-item--active');
         const icon = item.createSpan({ cls: 'hc-sem-drop-icon' });
         if (type === this.globalAssignFilterType) setIcon(icon, 'check');
+        renderTypeIcon(item, type);
         const lbl = item.createSpan({ text: type });
-        lbl.style.color = typeText(typeStyle);
+        lbl.style.color = typeText(getTypeStyle(type));
         item.addEventListener('click', () => {
           this.globalAssignFilterType = type;
           closeTypeDrop();
@@ -5133,7 +5179,6 @@ class HoldCourseView extends ItemView {
       const cls = classes.find(c => c.id === a.classId);
       if (!cls) continue;
 
-      const typeStyle = getTypeStyle(a.type);
       const info      = a.dueDate ? getDueInfo(a.dueDate) : null;
       const color     = getColor(cls.colorIndex);
 
@@ -5141,9 +5186,7 @@ class HoldCourseView extends ItemView {
       if (a.status === 'done') row.addClass('hc-assign-row--done');
 
       // Type pill
-      const pill = row.createSpan({ cls: 'hc-assign-pill', text: a.type || 'Other' });
-      pill.style.color = typeStyle.color;
-      pill.style.background = typeStyle.bg;
+      renderTypePill(row, a.type);
 
       // Middle: title, class chip + lecture context, grade (once done)
       const mid = row.createDiv('hc-assign-mid');
@@ -5622,11 +5665,9 @@ class HoldCourseView extends ItemView {
       this.render();
     });
     for (const type of CAL_LEGEND_TYPES) {
-      const style = getTypeStyle(type);
       const item = typeGroup.createDiv('hc-cal-legend-item');
       if (!this.calFilterTypes[type]) item.addClass('hc-cal-legend-item--off');
-      const dot = item.createDiv('hc-cal-legend-dot');
-      dot.style.background = style.color;
+      renderTypeIcon(item, type, 'hc-cal-legend-icon');
       item.createSpan({ cls: 'hc-cal-legend-label', text: type });
       item.addEventListener('click', () => {
         this.calFilterTypes[type] = !this.calFilterTypes[type];
@@ -5723,7 +5764,11 @@ class HoldCourseView extends ItemView {
             pill.style.background = style.bg;
             pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
           }
-          pill.setText(calItemDisplayTitle(item));
+          renderTypeIcon(pill, calItemTypeKey(item), 'hc-cal-pill-icon',
+            done ? 'var(--text-muted)'
+              : overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A')
+              : style.color);
+          pill.createSpan({ text: calItemDisplayTitle(item) });
         }
 
         if (extra > 0) {
@@ -5853,9 +5898,10 @@ class HoldCourseView extends ItemView {
       const row = pop.createDiv('hc-cal-popover-item');
       if (overdue) row.addClass('hc-cal-popover-item--overdue');
 
-      // Type-colored dot
-      const dot = row.createDiv('hc-cal-popover-dot');
-      dot.style.background = style.color;
+      // Type icon, tinted with the item's calendar colour (class colour for
+      // lectures, type colour for assignments/exams).
+      renderTypeIcon(row, calItemTypeKey(item), 'hc-cal-popover-icon',
+        overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color);
 
       const info = row.createDiv('hc-cal-popover-info');
       const kindText = item.kind === 'lecture' ? 'Lecture'
@@ -8226,10 +8272,14 @@ class HoldCourseTodayView extends ItemView {
     }
     if (item.kind === 'lecture') pill.addClass('hc-today-pill--lecture');
 
-    const titleEl = pill.createDiv({ cls: 'hc-today-item-title', text: item.title });
+    renderTypeIcon(pill, calItemTypeKey(item), 'hc-today-icon',
+      isDone ? 'var(--text-muted)' : style.color);
+    const body = pill.createDiv('hc-today-pill-body');
+
+    const titleEl = body.createDiv({ cls: 'hc-today-item-title', text: item.title });
     if (isDone) titleEl.style.textDecoration = 'line-through';
 
-    const meta = pill.createDiv({ cls: 'hc-today-item-meta' });
+    const meta = body.createDiv({ cls: 'hc-today-item-meta' });
     let metaText;
     if (item.kind === 'lecture') {
       metaText = item.cls.code + ' · Lecture';
@@ -8331,6 +8381,8 @@ Object.assign(module.exports, {
   getLectureProfessor,
   validateLectureTime,
   calLegendFilterPasses,
+  typeIcon,
+  ASSIGNMENT_TYPES,
   isWeekendDate,
   getISOWeekNumber,
 });

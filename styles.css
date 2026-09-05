@@ -2597,14 +2597,6 @@
 
 .hc-cal-popover-item:hover { background: var(--background-secondary); }
 
-.hc-cal-popover-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  margin-top: 5px;
-}
-
 .hc-cal-popover-info {
   flex: 1;
   min-width: 0;
@@ -2780,9 +2772,18 @@
   padding: 6px 8px;
   border-radius: 6px;
   display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.hc-today-pill-body {
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
+
+.hc-today-icon svg { width: 14px; height: 14px; }
 
 .hc-today-pill--lecture {
   border-radius: 20px;
@@ -3215,3 +3216,38 @@ body.hc-eink .hc-resource-source-icon {
   margin-top: 2px;
 }
 
+
+/* #45 — assignment type icons. Shape carries the type distinction alongside
+   the existing colour (readable at a glance, and on e-ink where #9's colour
+   approximation is weak). Icon is tinted with the type's colour inline. */
+.hc-type-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.hc-type-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Pills and the lecture-row type tag: lay icon + label on one line. */
+.hc-assign-pill,
+.hc-assign-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: top;
+}
+.hc-assign-pill--lg .hc-type-icon svg { width: 15px; height: 15px; }
+
+/* Calendar legend: icon replaces the old colour dot. */
+.hc-cal-legend-icon svg { width: 12px; height: 12px; }
+
+/* Calendar month-grid pill: small type icon before the title. Pill stays
+   display:block so its own text-overflow:ellipsis keeps working. */
+.hc-cal-pill-icon { vertical-align: -2px; margin-right: 2px; }
+.hc-cal-pill-icon svg { width: 11px; height: 11px; }
+
+/* Calendar popover: icon in the dot's slot (lectures keep the dot). */
+.hc-cal-popover-icon { margin-top: 3px; }
+.hc-cal-popover-icon svg { width: 13px; height: 13px; }
