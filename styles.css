@@ -276,8 +276,6 @@
 
 .hc-today-col { min-width: 0; }
 
-.hc-today-label--overdue { color: #E24B4A; }
-
 .hc-today-label {
   font-size: 11px;
   font-weight: 500;
@@ -3311,8 +3309,11 @@ body.hc-eink .hc-resource-source-icon {
 .hc-today-col--overdue { border-top-color: #E24B4A; }
 .hc-today-col--today   { border-top-color: #C08A00; }
 .hc-today-col--soon    { border-top-color: #3B6D11; }
-.hc-today-label--today { color: #C08A00; }
-.hc-today-label--soon  { color: #3B6D11; }
+/* All three label tints together, after the .hc-today-label base rule —
+   --overdue used to sit before the base and lose to it (never actually red). */
+.hc-today-label--overdue { color: #E24B4A; }
+.hc-today-label--today   { color: #C08A00; }
+.hc-today-label--soon    { color: #3B6D11; }
 .hc-today-row-icon svg { width: 13px; height: 13px; }
 .hc-today-row-icon.hc-class-icon--literal { font-size: 13px; }
 
