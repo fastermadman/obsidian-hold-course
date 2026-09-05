@@ -18,6 +18,11 @@ test('every assignment type has an icon', () => {
   }
 });
 
+test('Preparation is a real type with its own icon', () => {
+  assert.ok(ASSIGNMENT_TYPES.includes('Preparation'));
+  assert.notEqual(typeIcon('Preparation'), typeIcon('Other'));
+});
+
 test('unknown type falls back to the Other icon', () => {
   assert.equal(typeIcon('Nonsense'), typeIcon('Other'));
   assert.equal(typeIcon(undefined), typeIcon('Other'));
