@@ -53,6 +53,7 @@ const ASSIGNMENT_TYPE_STYLE = {
   'Exam':       { color: '#A0235F', colorDark: '#F088BB', bg: '#F8E4EF' },
   'Project':    { color: '#4A6FA5', colorDark: '#9BBCE9', bg: '#E4EBF5' },
   'Discussion': { color: '#5C7A00', colorDark: '#B3D45D', bg: '#EBF3D6' },
+  'Preparation':{ color: '#6D3B9E', colorDark: '#C0A0E6', bg: '#F0EAF9' },
   'Other':      { color: '#666666', colorDark: '#A8A8A8', bg: '#F0F0F0' },
 };
 
@@ -118,12 +119,12 @@ const EINK_UPCOMING_COLOR = 'color-mix(in srgb, var(--text-normal) 50%, transpar
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-const ASSIGNMENT_TYPES = ['Reading', 'Writing', 'Project', 'Discussion', 'Other'];
+const ASSIGNMENT_TYPES = ['Reading', 'Writing', 'Project', 'Discussion', 'Preparation', 'Other'];
 
 // Same list the calendar legend displays and its type filter toggles act on.
 // 'Exam' isn't an assignment type, but the legend groups it with them visually
 // (they share the "due date, not a class meeting" shape), so it lives here too.
-const CAL_LEGEND_TYPES = ['Reading', 'Writing', 'Discussion', 'Project', 'Exam', 'Other'];
+const CAL_LEGEND_TYPES = ['Reading', 'Writing', 'Discussion', 'Project', 'Exam', 'Preparation', 'Other'];
 
 const TERMS = ['Winter', 'Spring', 'Summer', 'Fall'];
 
@@ -337,6 +338,7 @@ const ASSIGNMENT_TYPE_ICON = {
   'Quiz':       'list-checks',
   'Exam':       'file-check',
   'Lecture':    'presentation',
+  'Preparation':'notebook-pen',
   'Other':      'circle',
 };
 
