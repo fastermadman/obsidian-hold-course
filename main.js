@@ -11,6 +11,7 @@ const {
   Menu,
   setIcon,
   addIcon,
+  getIconIds,
   MarkdownRenderer,
   FuzzySuggestModal,
   Platform,
@@ -377,6 +378,51 @@ function renderTypePill(parent, type, opts = {}) {
   return pill;
 }
 
+// #44: class visual identity. `cls.icon` holds either a Lucide icon id or a
+// literal Unicode symbol (the user's existing habit — a symbol typed into the
+// class code). Which one it is, is decided at render by membership in the
+// Lucide id set, cached once (~1900 ids).
+let _iconIdSet = null;
+function iconIdSet() {
+  if (!_iconIdSet) _iconIdSet = new Set(getIconIds());
+  return _iconIdSet;
+}
+
+function classIconRenderKind(v) {
+  if (!v) return 'none';
+  return iconIdSet().has(v) ? 'lucide' : 'literal';
+}
+
+// One resolver for every surface, mirroring renderTypeIcon(). Renders the
+// class's Lucide icon or literal symbol, tinted with the class colour so the
+// shape survives grayscale (e-ink) where the tint doesn't. `opts.fallback` is
+// a Lucide id used when the class has no icon set; without one, nothing is
+// rendered (caller keeps today's colour-only look). Returns the element or null.
+function renderClassIcon(parent, cls, opts = {}) {
+  const extra = opts.extraCls ? ` ${opts.extraCls}` : '';
+  const tint = opts.tint === false ? null
+    : (opts.color || (cls ? accentText(getColor(cls.colorIndex)) : null));
+  const kind = classIconRenderKind(cls && cls.icon);
+  if (kind === 'lucide') {
+    const span = parent.createSpan({ cls: `hc-class-icon${extra}` });
+    setIcon(span, cls.icon);
+    if (tint) span.style.color = tint;
+    return span;
+  }
+  if (kind === 'literal') {
+    const span = parent.createSpan({ cls: `hc-class-icon hc-class-icon--literal${extra}`, text: cls.icon });
+    if (tint) span.style.color = tint;
+    return span;
+  }
+  if (opts.fallback) {
+    const span = parent.createSpan({ cls: `hc-class-icon${extra}` });
+    setIcon(span, opts.fallback);
+    if (tint) span.style.color = tint;
+    return span;
+  }
+  return null;
+}
+
 function getTodayISO() {
   const d = new Date();
   return makeISO(d.getFullYear(), d.getMonth() + 1, d.getDate());
@@ -430,11 +476,11 @@ function getAllAssignments(semester) {
   const all = [];
   for (const cls of (semester.classes || [])) {
     for (const a of (cls.assignments || [])) {
-      all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex });
+      all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon });
     }
     for (const lec of (cls.lectures || [])) {
       for (const a of (lec.assignments || [])) {
-        all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, lectureId: lec.id });
+        all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon, lectureId: lec.id });
       }
     }
   }
@@ -1545,6 +1591,7 @@ class HoldCoursePlugin extends Plugin {
       endDate: classData.endDate || '',
       meetingStartTime: classData.meetingStartTime || '',
       meetingEndTime: classData.meetingEndTime || '',
+      icon: (classData.icon || '').trim(),
       lectures: [],
       assignments: [],
       exams: [],
@@ -2354,6 +2401,22 @@ class HoldCourseView extends ItemView {
     const sem = this._getViewedSemester();
     if (!sem || ['dashboard', 'assignments', 'calendar', 'courses'].includes(this.screen)) return;
 
+    // #44: class crumb = icon + code, one representation everywhere a class is
+    // named. `onClick` null → non-navigating span (the current-class crumb).
+    const classCrumb = (cls, onClick) => {
+      bc.createSpan({ cls: 'hc-bc-sep', text: '›' });
+      const el = onClick
+        ? bc.createEl('button', { cls: 'hc-bc-link hc-bc-class' })
+        : bc.createSpan({ cls: 'hc-bc-class' });
+      renderClassIcon(el, cls);
+      const codeSpan = el.createSpan({ text: cls.code });
+      codeSpan.style.color = accentText(getColor(cls.colorIndex));
+      codeSpan.style.fontWeight = '500';
+      if (!onClick) codeSpan.style.fontSize = '12px';
+      if (onClick) el.addEventListener('click', onClick);
+      return el;
+    };
+
     // The root names the route you actually took, for the whole class
     // subtree — see enteredViaCourses in the constructor for why this reads
     // its own field rather than any other navigation-state proxy.
@@ -2372,23 +2435,13 @@ class HoldCourseView extends ItemView {
 
     if (this.screen === 'class' && this.currentClassId) {
       const cls = sem.classes.find(c => c.id === this.currentClassId);
-      if (cls) {
-        bc.createSpan({ cls: 'hc-bc-sep', text: '›' });
-        const span = bc.createSpan({ text: cls.code });
-        span.style.color = accentText(getColor(cls.colorIndex));
-        span.style.fontWeight = '500';
-        span.style.fontSize = '12px';
-      }
+      if (cls) classCrumb(cls, null);
     }
 
     if (this.screen === 'lecture' && this.currentClassId && this.currentLectureId) {
       const cls = sem.classes.find(c => c.id === this.currentClassId);
       if (cls) {
-        bc.createSpan({ cls: 'hc-bc-sep', text: '›' });
-        const clsBtn = bc.createEl('button', { cls: 'hc-bc-link', text: cls.code });
-        clsBtn.style.color = accentText(getColor(cls.colorIndex));
-        clsBtn.style.fontWeight = '500';
-        clsBtn.addEventListener('click', () => this.navigate('class', cls.id));
+        classCrumb(cls, () => this.navigate('class', cls.id));
 
         const sorted = getLecturesSorted(cls);
         const idx = sorted.findIndex(l => l.id === this.currentLectureId);
@@ -2406,11 +2459,7 @@ class HoldCourseView extends ItemView {
         // it doesn't live in the Assignments list anymore. (LiveAQuietLife, 2026-09-01)
         const bcResult = this.plugin.findAssignment(sem.id, cls.id, this.currentAssignmentId);
         const bcIsReading = !!(bcResult && bcResult.assignment && bcResult.assignment.type === 'Reading');
-        bc.createSpan({ cls: 'hc-bc-sep', text: '›' });
-        const clsBtn = bc.createEl('button', { cls: 'hc-bc-link', text: cls.code });
-        clsBtn.style.color = accentText(getColor(cls.colorIndex));
-        clsBtn.style.fontWeight = '500';
-        clsBtn.addEventListener('click', () => {
+        classCrumb(cls, () => {
           this.currentTab = bcIsReading ? 'Readings' : 'Assignments';
           this.navigate('class', cls.id);
         });
@@ -2422,11 +2471,7 @@ class HoldCourseView extends ItemView {
     if (this.screen === 'exam' && this.currentClassId && this.currentExamId) {
       const cls = sem.classes.find(c => c.id === this.currentClassId);
       if (cls) {
-        bc.createSpan({ cls: 'hc-bc-sep', text: '›' });
-        const clsBtn = bc.createEl('button', { cls: 'hc-bc-link', text: cls.code });
-        clsBtn.style.color = accentText(getColor(cls.colorIndex));
-        clsBtn.style.fontWeight = '500';
-        clsBtn.addEventListener('click', () => {
+        classCrumb(cls, () => {
           this.currentTab = 'Exams';
           this.navigate('class', cls.id);
         });
@@ -2438,11 +2483,7 @@ class HoldCourseView extends ItemView {
     if (this.screen === 'resource' && this.currentClassId && this.currentResourceId) {
       const cls = sem.classes.find(c => c.id === this.currentClassId);
       if (cls) {
-        bc.createSpan({ cls: 'hc-bc-sep', text: '›' });
-        const clsBtn = bc.createEl('button', { cls: 'hc-bc-link', text: cls.code });
-        clsBtn.style.color = accentText(getColor(cls.colorIndex));
-        clsBtn.style.fontWeight = '500';
-        clsBtn.addEventListener('click', () => {
+        classCrumb(cls, () => {
           this.currentTab = 'Library';
           this.navigate('class', cls.id);
         });
@@ -2839,19 +2880,22 @@ class HoldCourseView extends ItemView {
 
     const strip = content.createDiv('hc-today-strip');
 
+    // #44: urgency lives on the column now (top rule + tinted label), not on a
+    // per-row dot — so the row's leading mark can be the class icon without two
+    // colour meanings fighting. No icon set on a class → row is just text.
+    const addRow = (col, a, withDate) => {
+      const row = col.createDiv('hc-today-row hc-today-row--clickable');
+      renderClassIcon(row, { icon: a.classIcon, colorIndex: a.colorIndex }, { extraCls: 'hc-today-row-icon' });
+      row.createSpan({ text: withDate ? `${a.title} · ${formatDate(a.dueDate)}` : a.title });
+      row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
+    };
+
     // Overdue — only rendered when something is actually overdue
     if (overdue.length) {
-      const overdueCol = strip.createDiv('hc-today-col');
+      const overdueCol = strip.createDiv('hc-today-col hc-today-col--overdue');
       overdueCol.createDiv({ cls: 'hc-today-label hc-today-label--overdue', text: 'Overdue' });
       const shown = overdue.slice(0, 5);
-      for (const a of shown) {
-        const info = getDueInfo(a.dueDate);
-        const row = overdueCol.createDiv('hc-today-row hc-today-row--clickable');
-        const dot = row.createDiv('hc-today-dot');
-        dot.style.background = info ? info.color : '#999';
-        row.createSpan({ text: `${a.title} · ${formatDate(a.dueDate)}` });
-        row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
-      }
+      for (const a of shown) addRow(overdueCol, a, true);
       if (overdue.length > shown.length) {
         const moreRow = overdueCol.createDiv('hc-today-row hc-today-empty');
         moreRow.createSpan({ text: `+${overdue.length - shown.length} more overdue` });
@@ -2859,34 +2903,20 @@ class HoldCourseView extends ItemView {
     }
 
     // Left: Due today — always shown, empty state if nothing
-    const leftCol = strip.createDiv('hc-today-col');
-    leftCol.createDiv({ cls: 'hc-today-label', text: 'Due today' });
+    const leftCol = strip.createDiv('hc-today-col hc-today-col--today');
+    leftCol.createDiv({ cls: 'hc-today-label hc-today-label--today', text: 'Due today' });
     if (dueToday.length) {
-      for (const a of dueToday) {
-        const info = getDueInfo(a.dueDate);
-        const row = leftCol.createDiv('hc-today-row hc-today-row--clickable');
-        const dot = row.createDiv('hc-today-dot');
-        dot.style.background = info ? info.color : '#999';
-        row.createSpan({ text: a.title });
-        row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
-      }
+      for (const a of dueToday) addRow(leftCol, a, false);
     } else {
       const emptyRow = leftCol.createDiv('hc-today-row hc-today-empty');
       emptyRow.createSpan({ text: 'No assignments due today.' });
     }
 
     // Right: Coming up — always shown, empty state if nothing
-    const rightCol = strip.createDiv('hc-today-col');
-    rightCol.createDiv({ cls: 'hc-today-label', text: 'Coming up' });
+    const rightCol = strip.createDiv('hc-today-col hc-today-col--soon');
+    rightCol.createDiv({ cls: 'hc-today-label hc-today-label--soon', text: 'Coming up' });
     if (comingUp.length) {
-      for (const a of comingUp) {
-        const info = getDueInfo(a.dueDate);
-        const row = rightCol.createDiv('hc-today-row hc-today-row--clickable');
-        const dot = row.createDiv('hc-today-dot');
-        dot.style.background = info ? info.color : '#999';
-        row.createSpan({ text: `${a.title} · ${formatDate(a.dueDate)}` });
-        row.addEventListener('click', () => this.navigate('assignment', a.classId, a.lectureId || null, a.id));
-      }
+      for (const a of comingUp) addRow(rightCol, a, true);
     } else {
       const emptyRow = rightCol.createDiv('hc-today-row hc-today-empty');
       emptyRow.createSpan({ text: 'Nothing coming up.' });
@@ -2908,7 +2938,9 @@ class HoldCourseView extends ItemView {
 
     // Code row with more button
     const codeRow = body.createDiv('hc-class-card-header');
-    const codeEl = codeRow.createDiv({ cls: 'hc-class-code', text: cls.code });
+    const codeWrap = codeRow.createDiv('hc-class-code-wrap');
+    renderClassIcon(codeWrap, cls);
+    const codeEl = codeWrap.createDiv({ cls: 'hc-class-code', text: cls.code });
     codeEl.style.color = accentText(color);
 
     const moreBtn = codeRow.createEl('button', { cls: 'hc-card-more-btn' });
@@ -3040,6 +3072,7 @@ class HoldCourseView extends ItemView {
     const codeRow = header.createDiv('hc-class-header-code-row');
     const accent = codeRow.createDiv('hc-class-header-accent');
     accent.style.background = color.fill;
+    renderClassIcon(codeRow, cls);
     const codeEl = codeRow.createSpan({ cls: 'hc-class-header-code', text: cls.code });
     codeEl.style.color = accentText(color);
 
@@ -4596,7 +4629,9 @@ class HoldCourseView extends ItemView {
       for (const classId of resource.classIds) {
         const c = sem.classes.find(x => x.id === classId);
         if (c) {
-          const chip = chipsEl.createSpan({ cls: 'hc-resource-class-chip', text: c.code });
+          const chip = chipsEl.createSpan({ cls: 'hc-resource-class-chip' });
+          renderClassIcon(chip, c);
+          chip.createSpan({ text: c.code });
           chip.style.color = accentText(getColor(c.colorIndex));
           chip.style.background = getColor(c.colorIndex).bg;
         }
@@ -4694,7 +4729,9 @@ class HoldCourseView extends ItemView {
       for (const classId of resource.classIds) {
         const c = sem.classes.find(x => x.id === classId);
         if (c) {
-          const chip = chipsRow.createSpan({ cls: 'hc-resource-class-chip', text: c.code });
+          const chip = chipsRow.createSpan({ cls: 'hc-resource-class-chip' });
+          renderClassIcon(chip, c);
+          chip.createSpan({ text: c.code });
           chip.style.color = accentText(getColor(c.colorIndex));
           chip.style.background = getColor(c.colorIndex).bg;
         }
@@ -4771,7 +4808,9 @@ class HoldCourseView extends ItemView {
       for (const { assignment, refCls, lectureLabel } of allRefs) {
         const refRow = refList.createDiv('hc-resource-ref-row');
 
-        const chip = refRow.createSpan({ cls: 'hc-resource-class-chip', text: refCls.code });
+        const chip = refRow.createSpan({ cls: 'hc-resource-class-chip' });
+        renderClassIcon(chip, refCls);
+        chip.createSpan({ text: refCls.code });
         chip.style.color = accentText(getColor(refCls.colorIndex));
         chip.style.background = getColor(refCls.colorIndex).bg;
 
@@ -5232,7 +5271,9 @@ class HoldCourseView extends ItemView {
       mid.createDiv({ cls: 'hc-assign-title', text: a.title });
 
       const contextRow = mid.createDiv('hc-assign-context-row');
-      const classChip  = contextRow.createSpan({ cls: 'hc-assign-class-chip', text: cls.code });
+      const classChip  = contextRow.createSpan({ cls: 'hc-assign-class-chip' });
+      renderClassIcon(classChip, cls);
+      classChip.createSpan({ text: cls.code });
       classChip.style.color = accentText(color);
 
       let lecLabel = 'Class-level';
@@ -5501,7 +5542,9 @@ class HoldCourseView extends ItemView {
         semCell.createSpan({ cls: 'hc-courses-sem-tag', text: 'Undated' });
       }
 
-      const codeEl = row.createDiv({ cls: 'hc-courses-code', text: cls.code });
+      const codeEl = row.createDiv({ cls: 'hc-courses-code' });
+      renderClassIcon(codeEl, cls);
+      codeEl.createSpan({ text: cls.code });
       codeEl.style.color = accentText(getColor(cls.colorIndex));
 
       row.createDiv({ cls: 'hc-courses-name', text: cls.name });
@@ -5684,8 +5727,11 @@ class HoldCourseView extends ItemView {
       const c = getColor(cls.colorIndex);
       const item = classGroup.createDiv('hc-cal-legend-item');
       if (!this.calFilterClassIds[cls.id]) item.addClass('hc-cal-legend-item--off');
-      const dot = item.createDiv('hc-cal-legend-dot');
-      dot.style.background = c.fill;
+      // #44: class icon replaces the colour dot when set (shape survives e-ink);
+      // no icon → keep today's dot.
+      if (!renderClassIcon(item, cls, { extraCls: 'hc-cal-legend-icon' })) {
+        item.createDiv('hc-cal-legend-dot').style.background = c.fill;
+      }
       item.createSpan({ cls: 'hc-cal-legend-label', text: cls.code });
       item.addEventListener('click', () => {
         this.calFilterClassIds[cls.id] = !this.calFilterClassIds[cls.id];
@@ -5804,10 +5850,17 @@ class HoldCourseView extends ItemView {
             pill.style.background = style.bg;
             pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
           }
-          renderTypeIcon(pill, calItemTypeKey(item), 'hc-cal-pill-icon',
-            done ? 'var(--text-muted)'
-              : overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A')
-              : style.color);
+          // #44: mixed-class context → class icon leads. Lectures show only the
+          // class icon (presentation fallback); assignments/exams show class + type.
+          const iconColor = done ? 'var(--text-muted)'
+            : overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A')
+            : style.color;
+          if (item.kind === 'lecture') {
+            renderClassIcon(pill, item.cls, { fallback: 'presentation', extraCls: 'hc-cal-pill-icon', color: iconColor });
+          } else {
+            renderClassIcon(pill, item.cls, { extraCls: 'hc-cal-pill-icon', color: iconColor });
+            renderTypeIcon(pill, calItemTypeKey(item), 'hc-cal-pill-icon', iconColor);
+          }
           pill.createSpan({ text: calItemDisplayTitle(item) });
         }
 
@@ -5938,10 +5991,12 @@ class HoldCourseView extends ItemView {
       const row = pop.createDiv('hc-cal-popover-item');
       if (overdue) row.addClass('hc-cal-popover-item--overdue');
 
-      // Type icon, tinted with the item's calendar colour (class colour for
-      // lectures, type colour for assignments/exams).
-      renderTypeIcon(row, calItemTypeKey(item), 'hc-cal-popover-icon',
-        overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color);
+      // #44: the row already carries a "Lecture/Exam/type" text label, so the
+      // icon slot shows the class. Fallback when the class has no icon: the
+      // lecture marker / the item's type icon.
+      const popIconColor = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
+      const popFallback = item.kind === 'lecture' ? 'presentation' : typeIcon(calItemTypeKey(item));
+      renderClassIcon(row, item.cls, { fallback: popFallback, extraCls: 'hc-cal-popover-icon', color: popIconColor });
 
       const info = row.createDiv('hc-cal-popover-info');
       const kindText = item.kind === 'lecture' ? 'Lecture'
@@ -6335,6 +6390,7 @@ class AddClassModal extends Modal {
       taName: '', taEmail: '', taOfficeHours: '',
       meetingDays: [],
       location: '', startDate: '', endDate: '', meetingStartTime: '', meetingEndTime: '',
+      icon: '',
     };
   }
 
@@ -6394,6 +6450,8 @@ class AddClassModal extends Modal {
       text.setPlaceholder('https://www.coursera.org/learn/...').setValue(this.formData.courseUrl).onChange(v => this.formData.courseUrl = v);
       text.inputEl.type = 'url';
     });
+
+    this._renderClassIconField(contentEl);
   }
 
   _renderPeopleFields(contentEl) {
@@ -6501,6 +6559,7 @@ class EditClassModal extends Modal {
       endDate: cls.endDate || '',
       meetingStartTime: cls.meetingStartTime || '',
       meetingEndTime: cls.meetingEndTime || '',
+      icon: cls.icon || '',
     };
   }
 
@@ -6556,6 +6615,8 @@ class EditClassModal extends Modal {
       text.setValue(this.formData.courseUrl).onChange(v => this.formData.courseUrl = v);
       text.inputEl.type = 'url';
     });
+
+    this._renderClassIconField(contentEl);
   }
 
   _renderPeopleFields(contentEl) {
@@ -6647,6 +6708,7 @@ class EditClassModal extends Modal {
       endDate: this.formData.endDate,
       meetingStartTime: this.formData.meetingStartTime,
       meetingEndTime: this.formData.meetingEndTime,
+      icon: (this.formData.icon || '').trim(),
     });
     this.onSave();
     this.close();
@@ -6806,6 +6868,31 @@ function _renderFooter(contentEl, saveLabel, onSave) {
   cancelBtn.addEventListener('click', () => this.close());
   const saveBtn = footer.createEl('button', { cls: 'hc-btn hc-btn--primary', text: saveLabel });
   saveBtn.addEventListener('click', onSave);
+}
+
+// #44 — shared by Add/EditClassModal. Reads/writes this.formData.icon; opens
+// the Lucide/symbol picker and previews the current choice.
+function _renderClassIconField(contentEl) {
+  const setting = new Setting(contentEl)
+    .setName('Icon')
+    .setDesc('A Lucide icon or a typed symbol — shown next to this class everywhere. Optional.');
+  const preview = setting.controlEl.createSpan({ cls: 'hc-class-icon-field-preview' });
+  const btn = setting.controlEl.createEl('button', { cls: 'hc-btn hc-btn--sm' });
+  const refresh = () => {
+    preview.empty();
+    const v = this.formData.icon;
+    if (classIconRenderKind(v) === 'lucide') setIcon(preview, v);
+    else if (v) preview.setText(v);
+    btn.setText(v ? 'Change' : 'Choose icon');
+  };
+  btn.addEventListener('click', () => {
+    new ClassIconSuggestModal(
+      this.app,
+      (val) => { this.formData.icon = val; refresh(); },
+      () => { this.formData.icon = ''; refresh(); },
+    ).open();
+  });
+  refresh();
 }
 
 class AddLectureModal extends Modal {
@@ -7821,6 +7908,43 @@ class DeleteExamModal extends Modal {
   onClose() { this.contentEl.empty(); }
 }
 
+// ─── Class icon picker (#44) ─────────────────────────────────────────────────
+
+class ClassIconSuggestModal extends FuzzySuggestModal {
+  constructor(app, onChoose, onRemove) {
+    super(app);
+    this.onChoose = onChoose;
+    this.onRemove = onRemove;
+    this.setPlaceholder('Search Lucide icons, or type a symbol and use the button below…');
+  }
+
+  onOpen() {
+    super.onOpen();
+    const footer = this.modalEl.createDiv('hc-suggest-footer');
+    const symBtn = footer.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Use typed symbol' });
+    symBtn.addEventListener('click', () => {
+      const v = (this.inputEl?.value || '').trim();
+      if (!v) { new Notice('Type a symbol in the search box first.'); return; }
+      this.close();
+      this.onChoose(v);
+    });
+    const rmBtn = footer.createEl('button', { cls: 'hc-btn hc-btn--sm', text: 'Remove icon' });
+    rmBtn.addEventListener('click', () => { this.close(); this.onRemove(); });
+  }
+
+  getItems() { return getIconIds(); }
+  getItemText(id) { return id; }
+
+  renderSuggestion(match, el) {
+    el.addClass('hc-icon-suggestion');
+    const preview = el.createSpan({ cls: 'hc-icon-suggestion-preview' });
+    setIcon(preview, match.item);
+    el.createSpan({ text: match.item });
+  }
+
+  onChooseItem(id) { this.onChoose(id); }
+}
+
 // ─── Vault file suggester ─────────────────────────────────────────────────────
 
 class VaultLinkSuggestModal extends FuzzySuggestModal {
@@ -8312,8 +8436,13 @@ class HoldCourseTodayView extends ItemView {
     }
     if (item.kind === 'lecture') pill.addClass('hc-today-pill--lecture');
 
-    renderTypeIcon(pill, calItemTypeKey(item), 'hc-today-icon',
-      isDone ? 'var(--text-muted)' : style.color);
+    // #44: the meta line below already names the type ("CODE · Lecture"), so the
+    // icon slot shows the class; fallback keeps a marker when no icon is set.
+    const todayFallback = item.kind === 'lecture' ? 'presentation' : typeIcon(calItemTypeKey(item));
+    renderClassIcon(pill, item.cls, {
+      fallback: todayFallback, extraCls: 'hc-today-icon',
+      color: isDone ? 'var(--text-muted)' : style.color,
+    });
     const body = pill.createDiv('hc-today-pill-body');
 
     const titleEl = body.createDiv({ cls: 'hc-today-item-title', text: item.title });
@@ -8389,6 +8518,8 @@ AddSemesterModal.prototype._renderFooter    = _renderFooter;
 EditSemesterModal.prototype._renderFooter   = _renderFooter;
 AddClassModal.prototype._renderFooter       = _renderFooter;
 EditClassModal.prototype._renderFooter      = _renderFooter;
+AddClassModal.prototype._renderClassIconField  = _renderClassIconField;
+EditClassModal.prototype._renderClassIconField = _renderClassIconField;
 AddLectureModal.prototype._renderFooter     = _renderFooter;
 EditLectureModal.prototype._renderFooter    = _renderFooter;
 AddAssignmentModal.prototype._renderFooter  = _renderFooter;
@@ -8424,6 +8555,7 @@ Object.assign(module.exports, {
   typeIcon,
   statusIcon,
   cycleStatus,
+  classIconRenderKind,
   ASSIGNMENT_TYPES,
   isWeekendDate,
   getISOWeekNumber,
