@@ -276,8 +276,6 @@
 
 .hc-today-col { min-width: 0; }
 
-.hc-today-label--overdue { color: #E24B4A; }
-
 .hc-today-label {
   font-size: 11px;
   font-weight: 500;
@@ -318,12 +316,6 @@
   white-space: nowrap;
 }
 
-.hc-today-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
 
 .hc-today-empty span {
   color: var(--text-faint);
@@ -3271,3 +3263,71 @@ body.hc-eink .hc-resource-source-icon {
 /* Calendar popover: icon in the dot's slot (lectures keep the dot). */
 .hc-cal-popover-icon { margin-top: 3px; }
 .hc-cal-popover-icon svg { width: 13px; height: 13px; }
+
+/* #44 — class visual identity: a tinted icon (Lucide or literal symbol) next
+   to the class code everywhere a class is named, and standing in for the
+   colour dot on mixed-class surfaces. Shape survives grayscale (e-ink) where
+   the tint doesn't. */
+.hc-class-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  vertical-align: -2px;
+}
+.hc-class-icon svg { width: 13px; height: 13px; }
+.hc-class-icon--literal {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Class card: icon + code sit together, more-button stays pushed right. */
+.hc-class-code-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Breadcrumb class crumb: icon + code inline. */
+.hc-bc-class {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Chips that now hold icon + code. */
+.hc-assign-class-chip,
+.hc-resource-class-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Dashboard buckets: urgency moves to the column (top rule + tinted label),
+   freeing the per-row slot for the class icon. */
+.hc-today-col { border-top: 2px solid transparent; padding-top: 8px; }
+.hc-today-col--overdue { border-top-color: #E24B4A; }
+.hc-today-col--today   { border-top-color: #C08A00; }
+.hc-today-col--soon    { border-top-color: #3B6D11; }
+/* All three label tints together, after the .hc-today-label base rule —
+   --overdue used to sit before the base and lose to it (never actually red). */
+.hc-today-label--overdue { color: #E24B4A; }
+.hc-today-label--today   { color: #C08A00; }
+.hc-today-label--soon    { color: #3B6D11; }
+.hc-today-row-icon svg { width: 13px; height: 13px; }
+.hc-today-row-icon.hc-class-icon--literal { font-size: 13px; }
+
+/* Class icon picker rows. */
+.hc-icon-suggestion { display: flex; align-items: center; gap: 10px; }
+.hc-icon-suggestion-preview { display: inline-flex; }
+.hc-icon-suggestion-preview svg { width: 16px; height: 16px; }
+
+/* Icon field in the class modal. */
+.hc-class-icon-field-preview {
+  display: inline-flex;
+  align-items: center;
+  min-width: 20px;
+  margin-right: 8px;
+  font-size: 15px;
+}
+.hc-class-icon-field-preview svg { width: 16px; height: 16px; }

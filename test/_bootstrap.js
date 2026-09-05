@@ -40,6 +40,7 @@ const stub = {
   Notice: class { constructor(message) { this.message = message; } },
   setIcon: () => {},
   addIcon: () => {},
+  getIconIds: () => ['circle', 'book-open', 'presentation', 'graduation-cap'],
   MarkdownRenderer: { render: async () => {} },
   FuzzySuggestModal: class {},
 };
