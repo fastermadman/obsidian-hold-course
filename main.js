@@ -20,6 +20,11 @@ const {
 
 const VIEW_TYPE = 'hold-course-view';
 const TODAY_VIEW_TYPE = 'hold-course-today';
+// Screens with a single item + prev/next chevrons, opened FROM some list —
+// as opposed to list/hub screens (dashboard, class, assignments, calendar,
+// courses), which are themselves the "along" axis's destination, never its
+// source. Used to decide when navigate() should set `origin` (see #14).
+const DETAIL_SCREENS = ['lecture', 'assignment', 'exam', 'resource'];
 
 // Horus (a separate, sibling plugin — github.com/fastermadman/horus) owns a
 // paginated reader view for .md notes. Opening a linked note there is a
@@ -629,6 +634,51 @@ function getExamsSorted(cls) {
   });
 }
 
+// Pulled out of _renderAssignmentsView so the global Assignments list's own
+// filter/sort/show-done logic is a pure function, callable from both the
+// screen itself and #14's prev/next (which needs the *same* filtered,
+// sorted set the user is actually looking at, not the unfiltered one).
+function getGlobalAssignments(sem, { classId = null, type = null, showDone = false, sort = 'due' } = {}) {
+  let items = getAllAssignments(sem);
+
+  if (classId)        items = items.filter(a => a.classId === classId);
+  if (type)            items = items.filter(a => a.type === type);
+  if (!showDone)        items = items.filter(a => a.status !== 'done');
+
+  const STATUS_ORDER = { 'overdue': 0, 'today': 1, 'soon': 2, 'upcoming': 3, 'done': 4, 'none': 5 };
+  const getUrgency = (a) => a.dueDate ? (getDueInfo(a.dueDate)?.urgency || 'upcoming') : 'none';
+
+  if (sort === 'due') {
+    items.sort((a, b) => {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  } else if (sort === 'class') {
+    items.sort((a, b) => {
+      const ca = a.classCode || '', cb = b.classCode || '';
+      if (ca !== cb) return ca.localeCompare(cb);
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  } else if (sort === 'status') {
+    items.sort((a, b) => {
+      const ua = STATUS_ORDER[getUrgency(a)] ?? 5;
+      const ub = STATUS_ORDER[getUrgency(b)] ?? 5;
+      if (ua !== ub) return ua - ub;
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return a.dueDate.localeCompare(b.dueDate);
+    });
+  }
+
+  return items;
+}
+
 function classStatusLabel(status) {
   if (!status) return '—';
   return status.charAt(0).toUpperCase() + status.slice(1);
@@ -952,6 +1002,28 @@ class HoldCoursePlugin extends Plugin {
       id: 'hc-show-global-assignments',
       name: 'Show global assignments',
       callback: () => this.activateAndNavigate('assignments'),
+    });
+
+    // Command-only, deliberately no default hotkey (bind your own) and no
+    // button in the UI — see the "along" vs. "back" distinction in
+    // HoldCourseView's constructor comment (#14). Silent no-op when there's
+    // nowhere to go, same as the disabled state prev/next chevrons use.
+    this.addCommand({
+      id: 'hc-nav-back',
+      name: 'Back',
+      callback: () => {
+        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+        if (leaf?.view instanceof HoldCourseView) leaf.view.back();
+      },
+    });
+
+    this.addCommand({
+      id: 'hc-nav-forward',
+      name: 'Forward',
+      callback: () => {
+        const leaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+        if (leaf?.view instanceof HoldCourseView) leaf.view.forward();
+      },
     });
 
     this.addCommand({
@@ -1679,8 +1751,51 @@ class HoldCourseView extends ItemView {
     // state, NOT plugin.data.currentSemesterId — deliberately a different name so
     // the two can never be confused. null = fall back to the current semester.
     this.viewedSemesterId = null;
+    // Whether the CURRENT CLASS SUBTREE (not just the current screen — this
+    // stays true all the way down through lecture/assignment/exam/resource,
+    // same lifetime as viewedSemesterId above) was entered via a Courses
+    // click. Kept as its own field rather than read off viewedSemesterId's
+    // truthiness (which #14 found the breadcrumb root used to do) — that
+    // reused a field whose real job is "which semester do detail screens
+    // resolve against" as a second, undocumented signal for "which route did
+    // you take," the same smuggling #14 also removed from `previousScreen`.
+    // Not derived from `origin` either: origin only remembers ONE screen
+    // back and gets replaced at every level, while this question needs to
+    // survive the whole subtree — a different lifetime, so it needs its own
+    // field, not reuse of either existing mechanism.
+    this.enteredViaCourses = false;
     this.currentTab = 'Lectures';
-    this.previousScreen = null;
+    // The navigation layer has three separate concerns, deliberately kept
+    // separate rather than collapsed into one mechanism (#14):
+    //  - "Up": the breadcrumb, pure hierarchy derived from the data — always
+    //    the same answer regardless of how you got here.
+    //  - "Along": `origin` below — the list screen a detail screen was opened
+    //    from (the filtered global Assignments list, a class tab, a lecture),
+    //    surfaced as a named "back to X" plus prev/next *scoped to that same
+    //    list* (see _originSequence()). A stack pop has no name and, for list
+    //    work (open/back/open/back), leaves a meaningless "forward" — a named
+    //    place is the better fit here even though it's not what a browser does.
+    //  - "Back"/"forward" as an actual undo history: `history`/`histIndex`,
+    //    exposed only as commands (Hold Course: Back/Forward), never as a
+    //    button, so it never competes with the named `origin` back button.
+    //
+    // Replaces the old `previousScreen`, which stored only the single most
+    // recent screen *name* and was silently overwritten by the first
+    // prev/next click — the exact bug that made Assignment detail's old
+    // contextual back button degrade after one chevron press.
+    this.origin = null;   // { screen, classId, lectureId, assignmentId, examId, resourceId, tab, scrollTop } | null
+    this.history = [];
+    this.histIndex = -1;
+    this._inRender = false;
+    // Filter/sort state rule (#14 audit, not yet fully applied — see #16):
+    // *screen-shaped* state (which filter, which tab, which month) belongs
+    // on the history entry and is restored on return via _restore(); the
+    // fields below currently live here on the view instance instead, so
+    // they die on reload and don't survive back()/forward() the way
+    // `tab` does. *Preference-shaped* state (sort order, show-done) belongs
+    // in data.json and survives restart — sem.assignSort/assignShowDone and
+    // cls.assignShowDone/readingsShowDone/examShowDone already follow this
+    // half of the rule correctly.
     this.globalAssignFilterClassId = null;
     this.globalAssignFilterType = null;
     this.classAssignFilterType = null;
@@ -1712,6 +1827,11 @@ class HoldCourseView extends ItemView {
   async onClose() { this._closeSemDrop(); this._closeCalPopover(); }
 
   navigate(screen, classId = null, lectureId = null, assignmentId = null, examId = null, resourceId = null, semesterId = null) {
+    // Capture where we're leaving BEFORE any state changes — this writes
+    // into the CURRENT (pre-navigation) history entry, which is only
+    // addressable via histIndex before _pushHistory() below moves it.
+    this._captureScrollIntoCurrentEntry();
+
     // Which semester the detail screens resolve against. Deliberately gated on
     // classId alone, NOT on screen === 'class': the calendar and the Today
     // sidebar navigate straight to 'lecture'/'assignment' without ever passing
@@ -1724,6 +1844,12 @@ class HoldCourseView extends ItemView {
     // context change; take whatever was passed, or null to fall back.
     if (classId !== this.currentClassId) {
       this.viewedSemesterId = semesterId;
+      // Set independently from viewedSemesterId above — see the constructor
+      // comment. Today only the Courses list's class click ever passes a
+      // semesterId, so the two happen to agree, but this field's value
+      // should keep meaning "you came from Courses" even if that stops
+      // being true.
+      this.enteredViaCourses = !!semesterId;
     }
     // Reset tab and library filter when moving to a different class
     if (screen === 'class' && classId !== this.currentClassId) {
@@ -1731,13 +1857,131 @@ class HoldCourseView extends ItemView {
       this.libraryFilterClassId = null;
       this.classAssignFilterType = null;
     }
-    this.previousScreen = this.screen;
+
+    // `origin` — see the constructor comment. Snapshot the screen we're
+    // LEAVING, but only when the destination is a detail screen (there's
+    // something to "go back to" only once you've opened one). Navigating to
+    // a list/hub screen means you've arrived somewhere with its own list, so
+    // origin clears. Same screen (prev/next) leaves origin untouched.
+    if (screen === this.screen) {
+      // no change
+    } else if (DETAIL_SCREENS.includes(screen)) {
+      // scrollTop: where the working set was scrolled to when this detail was
+      // opened — read now because navigate() always pushes a fresh history
+      // entry (scrollTop 0) for the destination, so _navigateToOrigin()'s own
+      // trip through navigate() can't recover it from `history` afterward.
+      const originScrollEl = this._getScrollEl();
+      this.origin = {
+        screen: this.screen, classId: this.currentClassId, lectureId: this.currentLectureId,
+        assignmentId: this.currentAssignmentId, examId: this.currentExamId, resourceId: this.currentResourceId,
+        tab: this.currentTab, scrollTop: originScrollEl ? originScrollEl.scrollTop : 0,
+      };
+    } else {
+      this.origin = null;
+    }
+
     this.screen = screen;
     this.currentClassId = classId;
     this.currentLectureId = lectureId;
     this.currentAssignmentId = assignmentId;
     this.currentExamId = examId;
     this.currentResourceId = resourceId;
+    this._pushHistory();
+    this.render();
+  }
+
+  // ─── History (back/forward) ──────────────────────────────────────────────
+  // Command-only (Hold Course: Back/Forward, no default hotkey) — deliberately
+  // never a button, so it never competes with the named `origin` back button.
+  // See the constructor comment for why both exist.
+
+  // Shared by _snapshot() and render()'s _identity() calls below — one 7-field
+  // shape, one place it's built.
+  _identity() {
+    return {
+      screen: this.screen, classId: this.currentClassId, lectureId: this.currentLectureId,
+      assignmentId: this.currentAssignmentId, examId: this.currentExamId, resourceId: this.currentResourceId,
+      tab: this.currentTab,
+    };
+  }
+
+  // `includeTab` differs by caller: history push-dedup (_pushHistory) ignores
+  // tab — a tab switch alone isn't a navigation, see navigateTab. render()'s
+  // same-screen check includes it — switching tabs should reset scroll like
+  // any other screen change.
+  _identityEqual(a, b, includeTab) {
+    if (!a || !b) return false;
+    return a.screen === b.screen && a.classId === b.classId && a.lectureId === b.lectureId &&
+      a.assignmentId === b.assignmentId && a.examId === b.examId && a.resourceId === b.resourceId &&
+      (!includeTab || a.tab === b.tab);
+  }
+
+  _snapshot() {
+    return {
+      ...this._identity(), origin: this.origin, scrollTop: 0,
+      // Both class-subtree-scoped, same lifetime as classId itself — without
+      // these, back()/forward() into a class reached via Courses would
+      // silently resolve against the wrong semester (see _getViewedSemester).
+      viewedSemesterId: this.viewedSemesterId, enteredViaCourses: this.enteredViaCourses,
+    };
+  }
+
+  _pushHistory() {
+    const snap = this._snapshot();
+    // A missing/deleted-data guard inside a renderer calls navigate() to
+    // redirect while render() is still executing (render -> renderer ->
+    // navigate -> render, recursively). Pushing there would stack a dead
+    // entry that back() could never get past — replace it instead, which
+    // makes back self-healing after something the user was looking at gets
+    // deleted out from under them.
+    if (this._inRender && this.histIndex >= 0) {
+      this.history[this.histIndex] = snap;
+      return;
+    }
+    if (this._identityEqual(this.history[this.histIndex], snap, false)) return;
+    this.history = this.history.slice(0, this.histIndex + 1);
+    this.history.push(snap);
+    this.histIndex = this.history.length - 1;
+    if (this.history.length > 50) {
+      this.history.shift();
+      this.histIndex--;
+    }
+  }
+
+  _captureScrollIntoCurrentEntry() {
+    if (this.histIndex < 0 || !this.history[this.histIndex]) return;
+    const scrollEl = this._getScrollEl();
+    if (scrollEl) this.history[this.histIndex].scrollTop = scrollEl.scrollTop;
+  }
+
+  back() {
+    if (this.histIndex <= 0) return;
+    this._captureScrollIntoCurrentEntry();
+    this.histIndex--;
+    this._restore(this.history[this.histIndex]);
+  }
+
+  forward() {
+    if (this.histIndex >= this.history.length - 1) return;
+    this._captureScrollIntoCurrentEntry();
+    this.histIndex++;
+    this._restore(this.history[this.histIndex]);
+  }
+
+  // Applies a history entry directly and re-renders WITHOUT going through
+  // navigate() — going through it would push a new entry and truncate the
+  // very forward history back()/forward() exist to move through.
+  _restore(snap) {
+    this.screen = snap.screen;
+    this.currentClassId = snap.classId;
+    this.currentLectureId = snap.lectureId;
+    this.currentAssignmentId = snap.assignmentId;
+    this.currentExamId = snap.examId;
+    this.currentResourceId = snap.resourceId;
+    this.currentTab = snap.tab;
+    this.origin = snap.origin;
+    this.viewedSemesterId = snap.viewedSemesterId;
+    this.enteredViaCourses = snap.enteredViaCourses;
     this.render();
   }
 
@@ -1754,16 +1998,53 @@ class HoldCourseView extends ItemView {
     return this.plugin.getCurrentSemester();
   }
 
+  // A tab switch is state ON the current screen, not a navigation to a new
+  // one — see the constructor comment's "screen-shaped state" rule. It
+  // updates the current history entry in place (so returning to this screen
+  // via back/forward restores the tab you left it on) but does not push:
+  // back always means "somewhere else", never "same place, other tab".
   navigateTab(tab) {
     this.currentTab = tab;
+    if (this.histIndex >= 0 && this.history[this.histIndex]) {
+      this.history[this.histIndex].tab = tab;
+    }
     this.render();
   }
 
   refresh() { this.render(); }
 
+  _getScrollEl() {
+    // Guards a view that hasn't rendered yet — navigate() can in principle
+    // run before the first render() (and does, under test, where contentEl
+    // is never set at all).
+    return this.contentEl ? this.contentEl.querySelector('.hc-content') : null;
+  }
+
   render() {
     this._closeSemDrop();
     this._closeCalPopover();
+
+    // Scroll bookkeeping happens against the OLD DOM, before empty() below
+    // removes it. Same-screen re-renders (a status toggle, a filter change —
+    // any of the ~70 call sites that call render() directly rather than
+    // navigate()) restore `outgoingTop` once the new DOM exists; a genuine
+    // navigation restores from the history entry instead (0 for a screen
+    // visited for the first time). navigate()/back()/forward() already wrote
+    // the OUTGOING screen's position into ITS entry before calling here.
+    const outgoingScrollEl = this._getScrollEl();
+    const outgoingTop = outgoingScrollEl ? outgoingScrollEl.scrollTop : 0;
+    const priorIdentity = this._lastRenderedIdentity;
+    const targetIdentity = this._identity();
+    const sameScreen = this._identityEqual(priorIdentity, targetIdentity, true);
+
+    // Re-entrancy guard: a missing/deleted-data redirect inside a renderer
+    // below calls navigate(), which calls render() again before this call
+    // has returned. `_pushHistory()` uses this flag to replace rather than
+    // stack a dead entry (see there); this call restores it afterward
+    // rather than just clearing it, so a redirect nested inside an outer
+    // recursive call doesn't prematurely un-flag the outer one.
+    const wasInRender = this._inRender;
+    this._inRender = true;
 
     this.contentEl.empty();
     const root = this.contentEl.createDiv('hc-root');
@@ -1774,21 +2055,36 @@ class HoldCourseView extends ItemView {
     const header = root.createDiv('hc-header');
     this._renderToolbar(header);
     const subheader = header.createDiv('hc-subheader');
+    this._renderSubheader(subheader);
 
     const content = root.createDiv('hc-content');
 
     switch (this.screen) {
       case 'dashboard':    this._renderDashboard(content); break;
       case 'class':        this._renderClassView(content); break;
-      case 'lecture':      this._renderLectureDetail(content, subheader); break;
-      case 'assignment':   this._renderAssignmentDetail(content, subheader); break;
-      case 'exam':         this._renderExamDetail(content, subheader); break;
-      case 'resource':     this._renderResourceDetail(content, subheader); break;
+      case 'lecture':      this._renderLectureDetail(content); break;
+      case 'assignment':   this._renderAssignmentDetail(content); break;
+      case 'exam':         this._renderExamDetail(content); break;
+      case 'resource':     this._renderResourceDetail(content); break;
       case 'assignments':  this._renderAssignmentsView(content); break;
       case 'calendar':     this._renderCalendarView(content); break;
       case 'courses':      this._renderCoursesView(content); break;
       default:             this._renderDashboard(content);
     }
+
+    this._inRender = wasInRender;
+
+    // If a nested render() already ran (the redirect case above), state has
+    // moved on since this call started and that nested call already painted
+    // and scrolled the real, redirected screen — stop here rather than
+    // overwrite it with bookkeeping computed for the screen we never
+    // actually rendered.
+    if (!this._identityEqual(targetIdentity, this._identity(), true)) return;
+
+    this._lastRenderedIdentity = targetIdentity;
+    const restoreTo = sameScreen ? outgoingTop : (this.history[this.histIndex]?.scrollTop || 0);
+    const scrollEl = this._getScrollEl();
+    if (scrollEl) scrollEl.scrollTop = Math.min(restoreTo, scrollEl.scrollHeight);
   }
 
   // ─── Toolbar ──────────────────────────────────────────────────────────────
@@ -1796,10 +2092,14 @@ class HoldCourseView extends ItemView {
   _renderToolbar(root) {
     const toolbar = root.createDiv('hc-toolbar');
 
-    // Logo
+    // Logo — acts as a home/Overview link, same target as the "Overview" nav
+    // button below (not the breadcrumb root's Courses-aware target: a logo
+    // click is a website convention for "take me home", not "take me back
+    // to wherever I entered from").
     const logo = toolbar.createDiv('hc-logo');
     logo.createSpan({ text: 'Hold' });
     logo.createSpan({ cls: 'hc-logo-accent', text: 'Course' });
+    logo.addEventListener('click', () => this.navigate('dashboard'));
 
     // Breadcrumb
     const bc = toolbar.createDiv('hc-breadcrumb');
@@ -1828,11 +2128,10 @@ class HoldCourseView extends ItemView {
     const sem = this._getViewedSemester();
     if (!sem || ['dashboard', 'assignments', 'calendar', 'courses'].includes(this.screen)) return;
 
-    // The root names the route you actually took. viewedSemesterId is set only by
-    // a click through from Courses, so its presence *is* "you came from Courses" —
-    // read as state, not history, which is why it survives drilling down and does
-    // not need a second field to track it.
-    const fromCourses = !!this.viewedSemesterId;
+    // The root names the route you actually took, for the whole class
+    // subtree — see enteredViaCourses in the constructor for why this reads
+    // its own field rather than any other navigation-state proxy.
+    const fromCourses = this.enteredViaCourses;
     const rootLabel = fromCourses ? 'Courses' : 'Overview';
     const ovBtn = bc.createEl('button', { cls: 'hc-bc-link', text: rootLabel });
     ovBtn.addEventListener('click', () => this.navigate(fromCourses ? 'courses' : 'dashboard'));
@@ -1925,6 +2224,184 @@ class HoldCourseView extends ItemView {
         bc.createSpan({ cls: 'hc-bc-link', text: 'Resource' });
       }
     }
+  }
+
+  // ─── Subheader ("along" axis) ────────────────────────────────────────────
+  // Named back-to-the-working-set button + prev/next scoped to that same
+  // set. Populated once here, before the screen switch, rather than by each
+  // detail renderer — one rule instead of four near-duplicates.
+
+  _renderSubheader(subheader) {
+    if (!this.origin) return; // list screens: stays empty, CSS hides the row
+
+    const backBtn = subheader.createEl('button', { cls: 'hc-btn hc-nav-back-btn' });
+    const backIcon = backBtn.createSpan({ cls: 'hc-btn-icon' });
+    setIcon(backIcon, 'arrow-left');
+    backBtn.createSpan({ text: this._originLabel(this.origin) });
+    backBtn.addEventListener('click', () => this._navigateToOrigin());
+
+    const seq = this._originSequence();
+    if (!seq) return;
+    const { items, index } = seq;
+    const prevItem = items[index - 1] || null;
+    const nextItem = items[index + 1] || null;
+
+    const navEl = subheader.createDiv('hc-detail-nav');
+    const prevBtn = navEl.createEl('button', { cls: 'hc-detail-nav-btn' });
+    setIcon(prevBtn, 'chevron-left');
+    prevBtn.disabled = !prevItem;
+    prevBtn.addEventListener('click', () => {
+      if (prevItem) this.navigate(prevItem.screen, prevItem.classId, prevItem.lectureId || null, prevItem.assignmentId || null, prevItem.examId || null, prevItem.resourceId || null);
+    });
+    navEl.createSpan({ cls: 'hc-detail-nav-pos', text: `${index + 1} / ${items.length}` });
+    const nextBtn = navEl.createEl('button', { cls: 'hc-detail-nav-btn' });
+    setIcon(nextBtn, 'chevron-right');
+    nextBtn.disabled = !nextItem;
+    nextBtn.addEventListener('click', () => {
+      if (nextItem) this.navigate(nextItem.screen, nextItem.classId, nextItem.lectureId || null, nextItem.assignmentId || null, nextItem.examId || null, nextItem.resourceId || null);
+    });
+  }
+
+  // Restores the tab BEFORE navigate() so the class-unchanged branch of
+  // navigate()'s own tab-reset logic (which only fires when the class
+  // itself changes) leaves it alone — landing back on the tab you left
+  // rather than always "Lectures".
+  _navigateToOrigin() {
+    if (!this.origin) return;
+    const o = this.origin;
+    if (o.screen === 'today') { this.navigate('dashboard'); return; }
+    if (o.tab) this.currentTab = o.tab;
+    this.navigate(o.screen, o.classId || null, o.lectureId || null, o.assignmentId || null, o.examId || null, o.resourceId || null);
+    // navigate() just pushed a fresh entry for the destination (scrollTop 0) —
+    // override with the offset captured when this origin was set, same clamp
+    // render()'s own restore uses.
+    const scrollEl = this._getScrollEl();
+    if (scrollEl) scrollEl.scrollTop = Math.min(o.scrollTop || 0, scrollEl.scrollHeight);
+  }
+
+  _originLabel(origin) {
+    const sem = this._getViewedSemester();
+    switch (origin.screen) {
+      case 'assignments': return 'All Assignments';
+      case 'today':        return 'Today';
+      case 'calendar':      return 'Calendar';
+      case 'lecture': {
+        const cls = sem && sem.classes.find(c => c.id === origin.classId);
+        const lec = cls && cls.lectures.find(l => l.id === origin.lectureId);
+        if (!cls) return 'Back';
+        if (!lec) return cls.code;
+        const sorted = getLecturesSorted(cls);
+        const num = sorted.indexOf(lec) + 1;
+        return `Lecture ${num}`;
+      }
+      case 'class': {
+        const cls = sem && sem.classes.find(c => c.id === origin.classId);
+        if (!cls) return 'Back';
+        return origin.tab && origin.tab !== 'Lectures' ? `${cls.code} · ${origin.tab}` : cls.code;
+      }
+      case 'assignment': return 'Assignment';
+      default: return 'Back';
+    }
+  }
+
+  // Prev/next targets for the CURRENT detail screen, scoped to the list it
+  // was actually opened from — not always "this class's full list", which
+  // is the bug #14 exists to fix (open a filtered global-Assignments row,
+  // and the old chevrons walked the class's whole set instead of the 8 rows
+  // you were looking at). Returns { items, index } or null when there's no
+  // sequence defined for this origin (see #17) or the current item isn't in it.
+  _originSequence() {
+    if (!this.origin) return null;
+    const sem = this._getViewedSemester();
+    if (!sem) return null;
+    const o = this.origin;
+
+    if (o.screen === 'assignments') {
+      const sorted = getGlobalAssignments(sem, {
+        classId: this.globalAssignFilterClassId,
+        type: this.globalAssignFilterType,
+        showDone: !!sem.assignShowDone,
+        sort: sem.assignSort,
+      });
+      const items = sorted.map(a => ({ screen: 'assignment', classId: a.classId, lectureId: a.lectureId || null, assignmentId: a.id }));
+      const index = items.findIndex(it => it.assignmentId === this.currentAssignmentId);
+      return index === -1 ? null : { items, index };
+    }
+
+    if (o.screen === 'lecture') {
+      const cls = sem.classes.find(c => c.id === o.classId);
+      const lec = cls && cls.lectures.find(l => l.id === o.lectureId);
+      if (!lec) return null;
+      // Mirrors the lecture detail screen's own two hide-done toggles
+      // (readingsShowDone/assignShowDone, added alongside this fix) — same
+      // reasoning as the class-tab branch below: a "next" click must not
+      // land on a row the screen you were looking at had actually hidden.
+      const readingsShowDone = cls.readingsShowDone !== false;
+      const assignShowDone = cls.assignShowDone !== false;
+      const items = (lec.assignments || [])
+        .filter(a => {
+          const showDone = a.type === 'Reading' ? readingsShowDone : assignShowDone;
+          return showDone || a.status !== 'done';
+        })
+        .map(a => ({ screen: 'assignment', classId: cls.id, lectureId: lec.id, assignmentId: a.id }));
+      const index = items.findIndex(it => it.assignmentId === this.currentAssignmentId);
+      return index === -1 ? null : { items, index };
+    }
+
+    if (o.screen === 'class') {
+      const cls = sem.classes.find(c => c.id === o.classId);
+      if (!cls) return null;
+
+      if (!o.tab || o.tab === 'Lectures') {
+        // Mirrors _renderLectureList's own cls.lectureShowDone filter — same
+        // "found on-device" gap as the two branches above: this one already
+        // had a working toggle, it just wasn't being read here.
+        const showDone = cls.lectureShowDone !== false;
+        let sorted = getLecturesSorted(cls);
+        if (!showDone) sorted = sorted.filter(l => l.status !== 'done');
+        const items = sorted.map(l => ({ screen: 'lecture', classId: cls.id, lectureId: l.id }));
+        const index = items.findIndex(it => it.lectureId === this.currentLectureId);
+        return index === -1 ? null : { items, index };
+      }
+
+      if (o.tab === 'Assignments' || o.tab === 'Readings') {
+        // #9: Assignments and Readings partition the same underlying sorted
+        // list by type (Reading vs. everything else) — mirrors
+        // _renderAssignmentList/_renderReadingsList exactly, including each
+        // tab's own show-done flag, or a "next" click could land on a row
+        // that's actually hidden by the tab's own filter.
+        const showDone = o.tab === 'Readings' ? cls.readingsShowDone !== false : cls.assignShowDone !== false;
+        let sorted = getAssignmentsSorted(cls).filter(item => {
+          const isReading = (item.assignment.type || 'Other') === 'Reading';
+          return o.tab === 'Readings' ? isReading : !isReading;
+        });
+        if (!showDone) sorted = sorted.filter(item => item.assignment.status !== 'done');
+        if (o.tab === 'Assignments' && this.classAssignFilterType) {
+          sorted = sorted.filter(item => (item.assignment.type || 'Other') === this.classAssignFilterType);
+        }
+        const items = sorted.map(item => ({ screen: 'assignment', classId: cls.id, lectureId: item.lectureId, assignmentId: item.assignment.id }));
+        const index = items.findIndex(it => it.assignmentId === this.currentAssignmentId);
+        return index === -1 ? null : { items, index };
+      }
+
+      if (o.tab === 'Exams') {
+        const showDone = cls.examShowDone !== false;
+        let sorted = getExamsSorted(cls);
+        if (!showDone) sorted = sorted.filter(e => e.status !== 'done');
+        const items = sorted.map(e => ({ screen: 'exam', classId: cls.id, examId: e.id }));
+        const index = items.findIndex(it => it.examId === this.currentExamId);
+        return index === -1 ? null : { items, index };
+      }
+
+      // ponytail: Library has no pagination sequence — resource detail never
+      // had prev/next even before #14, so this matches existing behaviour.
+      return null;
+    }
+
+    // ponytail: calendar/courses/today origins have no defined sequence —
+    // per-lens ordering (chronological across kinds? between classes?) needs
+    // its own design, not a bolt-on here. See #17.
+    return null;
   }
 
   // ─── Dashboard ────────────────────────────────────────────────────────────
@@ -2625,7 +3102,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Lecture detail ───────────────────────────────────────────────────────
 
-  _renderLectureDetail(content, subheader) {
+  _renderLectureDetail(content) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -2637,26 +3114,8 @@ class HoldCourseView extends ItemView {
     const sorted = getLecturesSorted(cls);
     const num = sorted.indexOf(lec) + 1;
 
-    // Back button dropped: the breadcrumb's class-code link (_renderBreadcrumb)
-    // already navigates back to the class, and it's sticky in the toolbar.
-    // Prev/next nav lives in the sticky subheader instead of scrolling away.
-    const navEl = subheader.createDiv('hc-detail-nav');
-    const idx = sorted.indexOf(lec);
-    const prevLec = sorted[idx - 1] || null;
-    const nextLec = sorted[idx + 1] || null;
-    const prevLecBtn = navEl.createEl('button', { cls: 'hc-detail-nav-btn' });
-    setIcon(prevLecBtn, 'chevron-left');
-    prevLecBtn.disabled = !prevLec;
-    prevLecBtn.addEventListener('click', () => {
-      if (prevLec) this.navigate('lecture', cls.id, prevLec.id);
-    });
-    navEl.createSpan({ cls: 'hc-detail-nav-pos', text: `${idx + 1} / ${sorted.length}` });
-    const nextLecBtn = navEl.createEl('button', { cls: 'hc-detail-nav-btn' });
-    setIcon(nextLecBtn, 'chevron-right');
-    nextLecBtn.disabled = !nextLec;
-    nextLecBtn.addEventListener('click', () => {
-      if (nextLec) this.navigate('lecture', cls.id, nextLec.id);
-    });
+    // Back button and prev/next: rendered once, uniformly, by _renderSubheader
+    // (see the constructor comment for the "along axis" rationale).
 
     // Lecture label
     const labelEl = content.createDiv('hc-lecture-detail-label');
@@ -2794,21 +3253,55 @@ class HoldCourseView extends ItemView {
     // even before anything's been added. (LiveAQuietLife, 2026-09-01)
     const lecAssignments = lec.assignments || [];
 
-    content.createDiv({ cls: 'hc-lecture-section-label', text: 'Readings' });
+    // Hide-done reuses the SAME flags as the class's Readings/Assignments
+    // tabs (cls.readingsShowDone/cls.assignShowDone) rather than a new,
+    // lecture-local field — toggling either one is "hide done work for this
+    // class", true regardless of which screen you're looking at it from.
+    // Was previously missing here entirely (the lecture screen always showed
+    // everything); found on-device as an inconsistency between this screen's
+    // chevrons and the class tab's.
+    if (cls.readingsShowDone === undefined) cls.readingsShowDone = true;
+    if (cls.assignShowDone === undefined) cls.assignShowDone = true;
+    const readingsShowDone = cls.readingsShowDone;
+    const assignShowDone = cls.assignShowDone;
+
+    const readingsLabelRow = content.createDiv('hc-lecture-section-label-row');
+    readingsLabelRow.createDiv({ cls: 'hc-lecture-section-label', text: 'Readings' });
+    const readingsDoneToggle = readingsLabelRow.createEl('button', { cls: 'hc-btn hc-btn--sm' });
+    setIcon(readingsDoneToggle.createSpan({ cls: 'hc-btn-icon' }), readingsShowDone ? 'eye-off' : 'eye');
+    readingsDoneToggle.createSpan({ text: readingsShowDone ? 'Hide done' : 'Show done' });
+    readingsDoneToggle.addEventListener('click', () => {
+      cls.readingsShowDone = !cls.readingsShowDone;
+      this.plugin.save();
+      this.render();
+    });
     const readingList = content.createDiv('hc-lecture-assign-list');
+    let readings = lecAssignments.filter(a => a.type === 'Reading');
+    if (!readingsShowDone) readings = readings.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       readingList,
-      lecAssignments.filter(a => a.type === 'Reading'),
+      readings,
       cls, lec,
       'No readings for this lecture.'
     );
 
     // Assignments section
-    content.createDiv({ cls: 'hc-lecture-section-label', text: 'Assignments' });
+    const assignLabelRow = content.createDiv('hc-lecture-section-label-row');
+    assignLabelRow.createDiv({ cls: 'hc-lecture-section-label', text: 'Assignments' });
+    const assignDoneToggle = assignLabelRow.createEl('button', { cls: 'hc-btn hc-btn--sm' });
+    setIcon(assignDoneToggle.createSpan({ cls: 'hc-btn-icon' }), assignShowDone ? 'eye-off' : 'eye');
+    assignDoneToggle.createSpan({ text: assignShowDone ? 'Hide done' : 'Show done' });
+    assignDoneToggle.addEventListener('click', () => {
+      cls.assignShowDone = !cls.assignShowDone;
+      this.plugin.save();
+      this.render();
+    });
     const assignList = content.createDiv('hc-lecture-assign-list');
+    let assignments = lecAssignments.filter(a => a.type !== 'Reading');
+    if (!assignShowDone) assignments = assignments.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       assignList,
-      lecAssignments.filter(a => a.type !== 'Reading'),
+      assignments,
       cls, lec,
       'No assignments for this lecture.'
     );
@@ -3243,7 +3736,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Assignment detail ────────────────────────────────────────────────────
 
-  _renderAssignmentDetail(content, subheader) {
+  _renderAssignmentDetail(content) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -3255,55 +3748,11 @@ class HoldCourseView extends ItemView {
     const color = getColor(cls.colorIndex);
     const typeStyle = getTypeStyle(assignment.type);
 
-    // Sticky subheader: back button + prev/next nav.
-    // Unlike lecture/exam/resource, this back button is NOT redundant with the
-    // breadcrumb's class-code link — it's contextual (All Assignments, the
-    // originating lecture, or the class), based on where you drilled in from,
-    // while the breadcrumb always goes to the class. Kept, and moved here so
-    // it stays visible on scroll like the rest of this fix.
-    const assignSorted = getAssignmentsSorted(cls);
-    const assignIdx = assignSorted.findIndex(item => item.assignment.id === assignment.id);
-    const prevAssign = assignIdx > 0 ? assignSorted[assignIdx - 1] : null;
-    const nextAssign = assignIdx < assignSorted.length - 1 ? assignSorted[assignIdx + 1] : null;
-
-    const backBtn = subheader.createEl('button', { cls: 'hc-btn hc-lecture-back-btn' });
-    const backIcon = backBtn.createSpan({ cls: 'hc-btn-icon' });
-    setIcon(backIcon, 'arrow-left');
-    const fromGlobal = this.previousScreen === 'assignments';
-    const fromLecture = this.previousScreen === 'lecture';
-    if (fromGlobal) backBtn.createSpan({ text: 'All Assignments' });
-    else if (fromLecture) {
-      const srcLec = cls.lectures.find(l => l.id === this.currentLectureId);
-      const srcSorted = getLecturesSorted(cls);
-      const srcNum = srcLec ? srcSorted.indexOf(srcLec) + 1 : '?';
-      backBtn.createSpan({ text: `Lecture ${srcNum}` });
-    } else backBtn.createSpan({ text: cls.code });
-    backBtn.addEventListener('click', () => {
-      if (fromGlobal) {
-        this.navigate('assignments');
-      } else if (fromLecture) {
-        this.navigate('lecture', cls.id, this.currentLectureId);
-      } else {
-        // #9: back to Readings for a Reading item, Assignments otherwise. (LiveAQuietLife, 2026-09-01)
-        this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
-        this.navigate('class', cls.id);
-      }
-    });
-
-    const assignNavEl = subheader.createDiv('hc-detail-nav');
-    const prevAssignBtn = assignNavEl.createEl('button', { cls: 'hc-detail-nav-btn' });
-    setIcon(prevAssignBtn, 'chevron-left');
-    prevAssignBtn.disabled = !prevAssign;
-    prevAssignBtn.addEventListener('click', () => {
-      if (prevAssign) this.navigate('assignment', cls.id, prevAssign.lectureId, prevAssign.assignment.id);
-    });
-    assignNavEl.createSpan({ cls: 'hc-detail-nav-pos', text: assignIdx >= 0 ? `${assignIdx + 1} / ${assignSorted.length}` : '' });
-    const nextAssignBtn = assignNavEl.createEl('button', { cls: 'hc-detail-nav-btn' });
-    setIcon(nextAssignBtn, 'chevron-right');
-    nextAssignBtn.disabled = !nextAssign;
-    nextAssignBtn.addEventListener('click', () => {
-      if (nextAssign) this.navigate('assignment', cls.id, nextAssign.lectureId, nextAssign.assignment.id);
-    });
+    // Back button and prev/next: rendered once, uniformly, by _renderSubheader.
+    // This screen's back button used to be hand-built here as a 3-way branch
+    // on previousScreen (All Assignments / the originating lecture / the
+    // class) — that's exactly what `origin` now captures generically for
+    // every detail screen, not just this one.
 
     // Type pill + title
     const titleRow = content.createDiv('hc-assign-detail-title-row');
@@ -3365,9 +3814,15 @@ class HoldCourseView extends ItemView {
     moveBtn.addEventListener('click', () => {
       new MoveAssignmentModal(this.app, this.plugin, sem.id, cls, assignment, lectureId, () => {
         this.plugin.save();
-        // #9: land on Readings after moving a Reading item. (LiveAQuietLife, 2026-09-01)
-        this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from, same as the
+        // back button — falls back to the class (Readings for a Reading
+        // item, #9) only when there's no origin to return to.
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -3394,9 +3849,15 @@ class HoldCourseView extends ItemView {
     deleteBtn.addEventListener('click', () => {
       new DeleteAssignmentModal(this.app, this.plugin, sem.id, cls.id, assignment, () => {
         this.plugin.save();
-        // #9: land on Readings after deleting a Reading item. (LiveAQuietLife, 2026-09-01)
-        this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from, same as the
+        // back button — falls back to the class (Readings for a Reading
+        // item, #9) only when there's no origin to return to.
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = assignment.type === 'Reading' ? 'Readings' : 'Assignments';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -3660,7 +4121,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Exam detail ──────────────────────────────────────────────────────────
 
-  _renderExamDetail(content, subheader) {
+  _renderExamDetail(content) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -3670,27 +4131,7 @@ class HoldCourseView extends ItemView {
 
     const color = getColor(cls.colorIndex);
 
-    // Back button dropped: the breadcrumb's class-code link already navigates
-    // back to the class (and sets the Exams tab there), and it's sticky.
-    const examSorted = getExamsSorted(cls);
-    const examIdx = examSorted.findIndex(e => e.id === exam.id);
-    const prevExam = examIdx > 0 ? examSorted[examIdx - 1] : null;
-    const nextExam = examIdx < examSorted.length - 1 ? examSorted[examIdx + 1] : null;
-
-    const examNavEl = subheader.createDiv('hc-detail-nav');
-    const prevExamBtn = examNavEl.createEl('button', { cls: 'hc-detail-nav-btn' });
-    setIcon(prevExamBtn, 'chevron-left');
-    prevExamBtn.disabled = !prevExam;
-    prevExamBtn.addEventListener('click', () => {
-      if (prevExam) this.navigate('exam', cls.id, null, null, prevExam.id);
-    });
-    examNavEl.createSpan({ cls: 'hc-detail-nav-pos', text: examIdx >= 0 ? `${examIdx + 1} / ${examSorted.length}` : '' });
-    const nextExamBtn = examNavEl.createEl('button', { cls: 'hc-detail-nav-btn' });
-    setIcon(nextExamBtn, 'chevron-right');
-    nextExamBtn.disabled = !nextExam;
-    nextExamBtn.addEventListener('click', () => {
-      if (nextExam) this.navigate('exam', cls.id, null, null, nextExam.id);
-    });
+    // Back button and prev/next: rendered once, uniformly, by _renderSubheader.
 
     // Title
     content.createDiv({ cls: 'hc-lecture-detail-title', text: exam.title });
@@ -3731,8 +4172,14 @@ class HoldCourseView extends ItemView {
     deleteBtn.addEventListener('click', () => {
       new DeleteExamModal(this.app, this.plugin, sem.id, cls.id, exam, () => {
         this.plugin.save();
-        this.currentTab = 'Exams';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from (falls back
+        // to the class's Exams tab when there's no origin to return to).
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = 'Exams';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -3907,7 +4354,7 @@ class HoldCourseView extends ItemView {
 
   // ─── Resource detail ──────────────────────────────────────────────────────
 
-  _renderResourceDetail(content, subheader) {
+  _renderResourceDetail(content) {
     const sem = this._getViewedSemester();
     if (!sem) { this.navigate('dashboard'); return; }
     const cls = sem.classes.find(c => c.id === this.currentClassId);
@@ -3919,9 +4366,9 @@ class HoldCourseView extends ItemView {
 
     const color = getColor(cls.colorIndex);
 
-    // Back button dropped: the breadcrumb's class-code link already navigates
-    // back to the class (and sets the Library tab there), and it's sticky.
-    // No prev/next pagination on this screen, so the subheader stays empty.
+    // Back button: rendered once, uniformly, by _renderSubheader. No
+    // prev/next sequence defined for the Library tab yet (see #17), so the
+    // subheader shows just the back button here.
 
     // Title
     content.createDiv({ cls: 'hc-lecture-detail-title', text: resource.title });
@@ -3972,8 +4419,14 @@ class HoldCourseView extends ItemView {
     deleteBtn.addEventListener('click', () => {
       new DeleteResourceModal(this.app, this.plugin, sem.id, resource, () => {
         this.plugin.save();
-        this.currentTab = 'Library';
-        this.navigate('class', cls.id);
+        // #14: return to wherever this screen was opened from (falls back
+        // to the class's Library tab when there's no origin to return to).
+        if (this.origin) {
+          this._navigateToOrigin();
+        } else {
+          this.currentTab = 'Library';
+          this.navigate('class', cls.id);
+        }
       }).open();
     });
 
@@ -4485,48 +4938,12 @@ class HoldCourseView extends ItemView {
     });
 
     // ── Gather + filter + sort ────────────────────────────────────────────────
-    let allAssigns = getAllAssignments(sem);
-
-    if (this.globalAssignFilterClassId) {
-      allAssigns = allAssigns.filter(a => a.classId === this.globalAssignFilterClassId);
-    }
-    if (this.globalAssignFilterType) {
-      allAssigns = allAssigns.filter(a => a.type === this.globalAssignFilterType);
-    }
-    if (!showDone) {
-      allAssigns = allAssigns.filter(a => a.status !== 'done');
-    }
-
-    const STATUS_ORDER = { 'overdue': 0, 'today': 1, 'soon': 2, 'upcoming': 3, 'done': 4, 'none': 5 };
-    const getUrgency = (a) => a.dueDate ? (getDueInfo(a.dueDate)?.urgency || 'upcoming') : 'none';
-
-    if (sem.assignSort === 'due') {
-      allAssigns.sort((a, b) => {
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      });
-    } else if (sem.assignSort === 'class') {
-      allAssigns.sort((a, b) => {
-        const ca = a.classCode || '', cb = b.classCode || '';
-        if (ca !== cb) return ca.localeCompare(cb);
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      });
-    } else if (sem.assignSort === 'status') {
-      allAssigns.sort((a, b) => {
-        const ua = STATUS_ORDER[getUrgency(a)] ?? 5;
-        const ub = STATUS_ORDER[getUrgency(b)] ?? 5;
-        if (ua !== ub) return ua - ub;
-        if (!a.dueDate && !b.dueDate) return 0;
-        if (!a.dueDate) return 1;
-        if (!b.dueDate) return -1;
-        return a.dueDate.localeCompare(b.dueDate);
-      });
-    }
+    const allAssigns = getGlobalAssignments(sem, {
+      classId: this.globalAssignFilterClassId,
+      type: this.globalAssignFilterType,
+      showDone,
+      sort: sem.assignSort,
+    });
 
     // ── List ──────────────────────────────────────────────────────────────────
     const list = content.createDiv('hc-assign-list');
@@ -7628,6 +8045,17 @@ class HoldCourseTodayView extends ItemView {
     if (item.kind === 'lecture')    view.navigate('lecture',    item.cls.id, item.lec.id);
     if (item.kind === 'assignment') view.navigate('assignment', item.cls.id, item.lectureId, item.assignment.id);
     if (item.kind === 'exam')       view.navigate('exam',       item.cls.id, null, null, item.exam.id);
+
+    // navigate()'s own origin rule just snapshotted whatever the main view
+    // happened to be showing before this call — meaningless here, since
+    // that's a different leaf the user wasn't looking at. Override with an
+    // explicit "Today" origin instead (#14), and patch the history entry
+    // navigate() already pushed to match, so back() reflects it too.
+    view.origin = { screen: 'today' };
+    if (view.histIndex >= 0 && view.history[view.histIndex]) {
+      view.history[view.histIndex].origin = view.origin;
+    }
+    view.render();
   }
 }
 
@@ -7667,6 +8095,8 @@ module.exports = HoldCoursePlugin;
 Object.assign(module.exports, {
   openVaultNote,
   ConfirmReloadModal,
+  getGlobalAssignments,
+  HoldCourseView,
   normalizeSettings,
   splitFrontmatter,
   sanitizeNoteFilename,

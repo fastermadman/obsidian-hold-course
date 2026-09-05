@@ -1,10 +1,10 @@
 ---
 issue: 14
 title: "Design a real navigation model: hierarchical breadcrumb vs. history-based back/forward"
-status: designed        # designed | in-progress | shipped | superseded
+status: in-progress    # designed | in-progress | shipped | superseded
 created: 2026-09-02T11:00:00Z
-updated: 2026-09-02T12:34:16Z
-author: Claude Opus 5
+updated: 2026-09-02T15:10:00Z
+author: Claude Opus 5, Claude Sonnet 5
 repo: fastermadman/obsidian-hold-course
 milestone: "Navigation layer"
 branch: 14-navigation-model
@@ -344,6 +344,51 @@ stating the three axes, why the visible back is a named place rather than a stac
 history is command-only, and why a tab switch is remembered but not undoable; and the same
 summary as a comment on #14 before closing it.
 
+## Why this is better than what was there (pitch for LiveAQuietLife)
+
+Plain-language version, for presenting the branch without walking through the code:
+
+**The problem in one sentence:** Assignment detail's back button was the only screen in the
+whole plugin with "remember where I came from" behavior, and that memory got silently wiped
+the moment you clicked prev/next once — nobody had noticed because nothing in the UI or code
+said this screen was special.
+
+**What was actually found, not just guessed at:** Auditing *why* that one screen was different
+turned up the same root cause in three more places nobody had connected before — the
+Assignments, Readings, and Exams tabs' own prev/next chevrons could send "next" to an item
+hidden by that tab's own "hide done" filter, because they always walked the class's *full*
+list instead of the filtered one you were actually looking at. Same bug, four symptoms. Fixing
+it once, structurally, fixed all four instead of patching the one that got reported.
+
+**Why the fix isn't "add a browser-style history stack" despite that being the obvious move:**
+A history stack is designed for a graph you don't know the shape of — the whole reason a
+browser needs one is that it has no idea a page is "the parent" of another page. HoldCourse's
+data has a fully known shape (Semester → Class → Lecture → Assignment). For that, a stack pop
+is worse, not better: open an assignment, go back, open a different one, go back — a browser's
+stack now holds four entries and "forward" means nothing to a user doing list work. So the
+fix keeps two *separate*, purpose-built mechanisms instead of forcing one general one to do
+both jobs — a **named** "back to X" button that always says exactly where you'll land, and a
+**real** history stack underneath it for genuine back/forward, but that one is deliberately
+command-only (bind your own hotkey) so it never shows up as a second, competing button.
+
+**What ships as a side effect, not the headline:** while touching every re-render path to add
+this, it became obvious the app never restored scroll position anywhere — toggling one
+checkbox in a 40-row list threw you back to the top of the list every time. That's fixed too,
+for every screen, not just the navigation-related ones.
+
+**What's explicitly NOT in this branch, and why that's a feature of the plan, not a gap:**
+five follow-on issues (#15–#19) were filed instead of folded in, each because it's a separable
+concern discovered along the way that would have bloated this diff without making the
+navigation fix itself easier to review: persisting view state across restarts, moving three
+scattered filter-state fields to match a rule this branch only documents, extending the
+prev/next fix to Calendar/Courses (which need their own design, not a bolt-on), keyboard
+accessibility on list rows (unrelated pre-existing gap, found in passing), and trackpad swipe
+(now buildable on top of the real history stack, but a UX decision on its own).
+
+**Shippability:** every commit avoids fork-only concepts (no e-ink, mobile-scale, or Boox
+references) specifically so the branch cherry-picks cleanly onto `upstream/main`, and the
+6-commit series is written to be read and reviewed commit-by-commit rather than as one diff.
+
 ## Deliberately out of scope
 
 - **Swipe gestures** — Electron gives plugins no real gesture event, so it means a `wheel`
@@ -362,3 +407,14 @@ summary as a comment on #14 before closing it.
   created. Plan moved from Claude's local plan-mode file into this repo at the user's request,
   so navigation history and rationale live with the code, not in a Claude-only temp path.
   Model handed off to Sonnet (high effort recommended) for §1–§7 implementation.
+- **2026-09-02T15:10Z** — §1–§7 implemented on branch `14-navigation-model`, 6 commits
+  (`44f2ca8`..`6da3a5d`), 20/20 tests passing. Along the way: found and fixed the same
+  prev/next-scoping bug in three more places than the plan called out (Assignments/
+  Readings/Exams class tabs, not just the global list); found and fixed a gap in the plan
+  itself — `_snapshot()`/`_restore()` initially omitted `viewedSemesterId`, which would have
+  made back()/forward() through a Courses-reached class resolve the wrong semester; found and
+  applied the deletion-handler origin fallback to Assignment's own Delete handler, which the
+  plan's file list missed (only listed the Move handler at that location). Not yet: pushed to
+  origin, opened as a PR, or verified on-device (Boox). See "Why this is better" above for the
+  plain-language version of this section, written for presenting the branch to
+  LiveAQuietLife.

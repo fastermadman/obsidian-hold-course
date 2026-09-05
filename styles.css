@@ -49,6 +49,11 @@
   color: var(--text-normal);
   letter-spacing: -0.01em;
   flex-shrink: 0;
+  cursor: pointer;
+}
+
+.hc-logo:hover {
+  opacity: 0.8;
 }
 
 .hc-logo-accent {
@@ -1071,7 +1076,10 @@
 
 /* --- Lecture detail -------------------------------------------------------- */
 
-.hc-lecture-back-btn {
+/* Renamed from .hc-lecture-back-btn (#14) — this button is no longer
+   lecture-specific, it's the one back-to-the-working-set button every
+   detail screen shares via _renderSubheader. */
+.hc-nav-back-btn {
   margin-bottom: 0;
 }
 
@@ -1182,6 +1190,16 @@
   text-transform: uppercase;
   margin-bottom: 10px;
   margin-top: 24px;
+}
+
+.hc-lecture-section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hc-lecture-section-label-row .hc-lecture-section-label {
+  margin-bottom: 0;
 }
 
 .hc-lecture-notes {
