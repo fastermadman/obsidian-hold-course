@@ -333,9 +333,10 @@ const ASSIGNMENT_TYPE_ICON = {
   'Reading':    'book-open',
   'Writing':    'pen-line',
   'Project':    'folder',
-  'Discussion': 'message-square',
+  'Discussion': 'messages-square',
   'Quiz':       'list-checks',
   'Exam':       'file-check',
+  'Lecture':    'presentation',
   'Other':      'circle',
 };
 
@@ -343,14 +344,22 @@ function typeIcon(type) {
   return ASSIGNMENT_TYPE_ICON[type] || ASSIGNMENT_TYPE_ICON['Other'];
 }
 
+// The type key a calendar item shows its icon for — lecture and exam are
+// their own item kinds, assignments carry a type field.
+function calItemTypeKey(item) {
+  if (item.kind === 'lecture') return 'Lecture';
+  if (item.kind === 'exam')    return 'Exam';
+  return item.assignment.type || 'Other';
+}
+
 // Shared type-icon renderer — every surface that shows a type (rows, pills,
 // calendar legend/popover, filter dropdowns) goes through this, mirroring how
 // getTypeStyle() is the single colour lookup. Icon is tinted with the type's
 // own colour to keep the association users already built up.
-function renderTypeIcon(parent, type, extraCls) {
+function renderTypeIcon(parent, type, extraCls, colorOverride) {
   const span = parent.createSpan({ cls: extraCls ? `hc-type-icon ${extraCls}` : 'hc-type-icon' });
   setIcon(span, typeIcon(type));
-  span.style.color = typeText(getTypeStyle(type));
+  span.style.color = colorOverride || typeText(getTypeStyle(type));
   return span;
 }
 
@@ -5755,10 +5764,10 @@ class HoldCourseView extends ItemView {
             pill.style.background = style.bg;
             pill.style.color = overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color;
           }
-          if (item.kind !== 'lecture') {
-            const type = item.kind === 'exam' ? 'Exam' : (item.assignment.type || 'Other');
-            renderTypeIcon(pill, type, 'hc-cal-pill-icon');
-          }
+          renderTypeIcon(pill, calItemTypeKey(item), 'hc-cal-pill-icon',
+            done ? 'var(--text-muted)'
+              : overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A')
+              : style.color);
           pill.createSpan({ text: calItemDisplayTitle(item) });
         }
 
@@ -5889,14 +5898,10 @@ class HoldCourseView extends ItemView {
       const row = pop.createDiv('hc-cal-popover-item');
       if (overdue) row.addClass('hc-cal-popover-item--overdue');
 
-      // Type icon for assignments/exams; lectures keep the class-colour dot.
-      if (item.kind === 'lecture') {
-        const dot = row.createDiv('hc-cal-popover-dot');
-        dot.style.background = style.color;
-      } else {
-        const type = item.kind === 'exam' ? 'Exam' : (item.assignment.type || 'Other');
-        renderTypeIcon(row, type, 'hc-cal-popover-icon');
-      }
+      // Type icon, tinted with the item's calendar colour (class colour for
+      // lectures, type colour for assignments/exams).
+      renderTypeIcon(row, calItemTypeKey(item), 'hc-cal-popover-icon',
+        overdue ? (einkActive ? EINK_URGENT_COLOR : '#E24B4A') : style.color);
 
       const info = row.createDiv('hc-cal-popover-info');
       const kindText = item.kind === 'lecture' ? 'Lecture'
@@ -8267,10 +8272,14 @@ class HoldCourseTodayView extends ItemView {
     }
     if (item.kind === 'lecture') pill.addClass('hc-today-pill--lecture');
 
-    const titleEl = pill.createDiv({ cls: 'hc-today-item-title', text: item.title });
+    renderTypeIcon(pill, calItemTypeKey(item), 'hc-today-icon',
+      isDone ? 'var(--text-muted)' : style.color);
+    const body = pill.createDiv('hc-today-pill-body');
+
+    const titleEl = body.createDiv({ cls: 'hc-today-item-title', text: item.title });
     if (isDone) titleEl.style.textDecoration = 'line-through';
 
-    const meta = pill.createDiv({ cls: 'hc-today-item-meta' });
+    const meta = body.createDiv({ cls: 'hc-today-item-meta' });
     let metaText;
     if (item.kind === 'lecture') {
       metaText = item.cls.code + ' · Lecture';

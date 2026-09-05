@@ -22,3 +22,10 @@ test('unknown type falls back to the Other icon', () => {
   assert.equal(typeIcon('Nonsense'), typeIcon('Other'));
   assert.equal(typeIcon(undefined), typeIcon('Other'));
 });
+
+// Lecture and Exam are their own calendar item kinds, not in ASSIGNMENT_TYPES,
+// but calItemTypeKey() routes them through typeIcon() too.
+test('Lecture and Exam have their own icons, not the Other fallback', () => {
+  assert.notEqual(typeIcon('Lecture'), typeIcon('Other'));
+  assert.notEqual(typeIcon('Exam'), typeIcon('Other'));
+});
