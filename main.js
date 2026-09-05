@@ -2903,11 +2903,12 @@ class HoldCourseView extends ItemView {
     const strip = content.createDiv('hc-today-strip');
 
     // #44: urgency lives on the column now (top rule + tinted label), not on a
-    // per-row dot — so the row's leading mark can be the class icon without two
-    // colour meanings fighting. No icon set on a class → row is just text.
+    // per-row dot. #57: mixed-class item context → [class][type] — the type
+    // icon tells a reading from a hand-in from an exam at a glance.
     const addRow = (col, a, withDate) => {
       const row = col.createDiv('hc-today-row hc-today-row--clickable');
       renderClassIcon(row, { icon: a.classIcon, colorIndex: a.colorIndex }, { extraCls: 'hc-today-row-icon' });
+      renderTypeIcon(row, a.kind === 'exam' ? 'Exam' : (a.type || 'Other'), 'hc-today-row-icon');
       row.createSpan({ text: withDate ? `${a.title} · ${formatDate(a.dueDate)}` : a.title });
       row.addEventListener('click', () => {
         if (a.kind === 'exam') this.navigate('exam', a.classId, null, null, a.id);
