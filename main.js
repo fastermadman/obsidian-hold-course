@@ -99,6 +99,10 @@ const EINK_FILL_OVERRIDE = {
   green:  'color-mix(in srgb, var(--text-normal) 90%, transparent)',
 };
 let einkActive = false;
+// Manual override for time display — 'auto' keeps following the OS/Obsidian
+// locale (the previous, only behavior); '12h'/'24h' force it regardless of
+// locale, for e.g. an English-locale user who still wants 24h clocks.
+let timeFormatSetting = 'auto';
 
 // #9: getDueInfo()'s urgency colors used to be absolute hex darkened "while
 // still reading against a white page" — broke under Obsidian's dark theme
@@ -728,14 +732,19 @@ function formatDateLong(isoDate) {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-// Stored as 24h "HH:MM"; displayed per locale. Anchored to an arbitrary date —
-// only the time-of-day portion is used.
+// Stored as 24h "HH:MM"; displayed per locale by default, or forced to
+// 12h/24h by the "Time format" setting (timeFormatSetting) regardless of
+// locale. Anchored to an arbitrary date — only the time-of-day portion is
+// used.
 function formatTimeShort(hhmm) {
   if (!hhmm) return '';
   const [h, m] = hhmm.split(':').map(Number);
   if (Number.isNaN(h) || Number.isNaN(m)) return '';
   const d = new Date(2000, 0, 1, h, m);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const opts = { hour: 'numeric', minute: '2-digit' };
+  if (timeFormatSetting === '24h') opts.hour12 = false;
+  if (timeFormatSetting === '12h') opts.hour12 = true;
+  return d.toLocaleTimeString([], opts);
 }
 
 function formatTimeRange(startHHMM, endHHMM) {
@@ -760,12 +769,14 @@ function to24h(hour12, minute, period) {
   return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-// Whether the OS/Obsidian locale's own convention is 24h, not 12h+AM/PM —
-// the same thing formatTimeShort()'s toLocaleTimeString([]) already follows
-// for DISPLAY. Asking Intl directly (rather than a plugin setting) keeps
-// the picker's format agreeing with how times are shown everywhere else,
-// with no new configurability nobody asked for.
+// Whether the time picker should show a 24h dial or 12h+AM/PM — follows the
+// "Time format" setting when set, otherwise the OS/Obsidian locale's own
+// convention (same thing formatTimeShort()'s toLocaleTimeString() follows
+// for display), so the picker always agrees with how times are shown
+// everywhere else.
 function uses24hFormat() {
+  if (timeFormatSetting === '24h') return true;
+  if (timeFormatSetting === '12h') return false;
   return new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 === false;
 }
 
@@ -998,6 +1009,7 @@ function normalizeSettings(obj, defaultScale) {
   return {
     einkMode: s.einkMode === true,
     mobileScale: typeof s.mobileScale === 'number' ? s.mobileScale : defaultScale,
+    timeFormat: ['auto', '12h', '24h'].includes(s.timeFormat) ? s.timeFormat : 'auto',
   };
 }
 
@@ -1020,6 +1032,7 @@ class HoldCoursePlugin extends Plugin {
 
     this.applyEinkClass();
     this.applyMobileScale();
+    this.applyTimeFormat();
 
     this.addSettingTab(new HoldCourseSettingTab(this.app, this));
 
@@ -1145,6 +1158,10 @@ class HoldCoursePlugin extends Plugin {
   applyEinkClass() {
     einkActive = this.settings.einkMode;
     document.body.classList.toggle('hc-eink', einkActive);
+  }
+
+  applyTimeFormat() {
+    timeFormatSetting = this.settings.timeFormat;
   }
 
   applyMobileScale() {
@@ -1743,6 +1760,21 @@ class HoldCourseSettingTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.einkMode = value;
           this.plugin.applyEinkClass();
+          this.plugin.refreshAllViews();
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Time format')
+      .setDesc('How lecture/meeting times are displayed. "Match system" follows your OS/Obsidian locale (e.g. English usually means AM/PM) — override it here if you want 24h regardless of locale, or vice versa.')
+      .addDropdown((dropdown) => dropdown
+        .addOption('auto', 'Match system')
+        .addOption('24h', '24-hour')
+        .addOption('12h', '12-hour (AM/PM)')
+        .setValue(this.plugin.settings.timeFormat)
+        .onChange(async (value) => {
+          this.plugin.settings.timeFormat = value;
+          this.plugin.applyTimeFormat();
           this.plugin.refreshAllViews();
           await this.plugin.saveSettings();
         }));
