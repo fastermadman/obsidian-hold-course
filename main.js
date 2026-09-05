@@ -710,15 +710,51 @@ function to24h(hour12, minute, period) {
   return `${String(h).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-// Custom time picker — hour/minute dropdowns plus an AM/PM toggle styled
-// like the day-toggle chips, replacing the native OS time control. 5-minute
-// increments (typical class start times don't need finer). Renders a
-// starting display (defaults to 9:00 AM when nothing is set yet) but only
-// calls onChange on genuine user interaction — an untouched field leaves
-// the underlying value empty, same as the native input did.
+// Whether the OS/Obsidian locale's own convention is 24h, not 12h+AM/PM —
+// the same thing formatTimeShort()'s toLocaleTimeString([]) already follows
+// for DISPLAY. Asking Intl directly (rather than a plugin setting) keeps
+// the picker's format agreeing with how times are shown everywhere else,
+// with no new configurability nobody asked for.
+function uses24hFormat() {
+  return new Intl.DateTimeFormat([], { hour: 'numeric' }).resolvedOptions().hour12 === false;
+}
+
+// Custom time picker — hour/minute dropdowns, replacing the native OS time
+// control for 5-minute increments (typical class start times don't need
+// finer). 12h locales get an AM/PM toggle styled like the day-toggle chips;
+// 24h locales get a single 0–23 hour dropdown and no toggle at all — see
+// uses24hFormat(). Storage stays 24h "HH:MM" either way. Renders a starting
+// display (defaults to 9:00/09:00 when nothing is set yet) but only calls
+// onChange on genuine user interaction — an untouched field leaves the
+// underlying value empty, same as the native input did.
 function renderTimePicker(contentEl, labelText, initialValue, onChange) {
   const setting = new Setting(contentEl).setName(labelText);
   const wrap = setting.controlEl.createDiv('hc-time-picker');
+
+  if (uses24hFormat()) {
+    const parsedHM = (initialValue || '').split(':').map(Number);
+    let hour = Number.isNaN(parsedHM[0]) ? 9 : parsedHM[0];
+    let minute = Number.isNaN(parsedHM[1]) ? 0 : parsedHM[1];
+
+    const hourSel = wrap.createEl('select', { cls: 'hc-time-select' });
+    for (let h = 0; h <= 23; h++) {
+      const opt = hourSel.createEl('option', { text: String(h).padStart(2, '0'), value: String(h) });
+      if (h === hour) opt.selected = true;
+    }
+
+    wrap.createSpan({ cls: 'hc-time-colon', text: ':' });
+
+    const minSel = wrap.createEl('select', { cls: 'hc-time-select' });
+    for (let m = 0; m < 60; m += 5) {
+      const opt = minSel.createEl('option', { text: String(m).padStart(2, '0'), value: String(m) });
+      if (m === minute) opt.selected = true;
+    }
+
+    const emit = () => onChange(`${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`);
+    hourSel.addEventListener('change', () => { hour = Number(hourSel.value); emit(); });
+    minSel.addEventListener('change', () => { minute = Number(minSel.value); emit(); });
+    return;
+  }
 
   const parsed = parse24hTo12h(initialValue) || { hour12: 9, minute: 0, period: 'AM' };
   let hour12 = parsed.hour12, minute = parsed.minute, period = parsed.period;
@@ -809,6 +845,39 @@ function classMeetsOnDate(cls, dateISO, weekdayName) {
   );
 }
 
+// #41 — a lecture's own meetingStartTime/meetingEndTime, when it has one,
+// always wins: unlike the class-schedule stamp below (classMeetsOnDate),
+// an explicit override applies regardless of whether the lecture's date
+// falls on one of the class's recurring days — that's exactly the case for
+// a rescheduled/makeup lecture. Falls back to the class's recurring-
+// schedule time ONLY on a day that schedule actually covers; a lecture
+// with neither has no time, same as before #41.
+function getLectureMeeting(cls, lec, weekdayName) {
+  if (lec.meetingStartTime && lec.meetingEndTime) {
+    return { startTime: lec.meetingStartTime, endTime: lec.meetingEndTime };
+  }
+  if (weekdayName === undefined) {
+    weekdayName = WEEKDAY_NAMES[new Date(lec.date + 'T12:00:00').getDay()];
+  }
+  if (lec.date && classMeetsOnDate(cls, lec.date, weekdayName)) {
+    return { startTime: cls.meetingStartTime, endTime: cls.meetingEndTime };
+  }
+  return { startTime: '', endTime: '' };
+}
+
+// #41 — location/professor are treated as standing facts about the class
+// ("this class meets in Room 214 with Prof. X"), not tied to a specific
+// recurring day the way meeting time is — so unlike getLectureMeeting()
+// above, these fall back to the class's value unconditionally, on any
+// date, not just ones the class's weekly schedule covers.
+function getLectureLocation(cls, lec) {
+  return lec.location || cls.location || '';
+}
+
+function getLectureProfessor(cls, lec) {
+  return lec.professorName || cls.professorName || '';
+}
+
 function getItemsForDate(sem, dateISO, filterClassId) {
   const items = [];
   const weekdayName = WEEKDAY_NAMES[new Date(dateISO + 'T12:00:00').getDay()];
@@ -819,12 +888,22 @@ function getItemsForDate(sem, dateISO, filterClassId) {
     // Today, Tomorrow, month, and week all read this same list.
     if (cls.status === 'completed' || cls.status === 'dropped') continue;
 
-    let firstLectureItemToday = null;
     for (const lec of (cls.lectures || [])) {
       if (lec.date === dateISO) {
-        const item = { kind: 'lecture', title: lec.title, cls, lec };
-        items.push(item);
-        if (!firstLectureItemToday) firstLectureItemToday = item;
+        // #41 — each lecture resolves its own meeting time/location/
+        // professor independently (own override, else the class's), rather
+        // than stamping one shared class-schedule time onto only the
+        // first lecture found for the date — a lecture with its own
+        // override must not be overwritten with the class's default just
+        // because another lecture happened to be found first.
+        const meeting = getLectureMeeting(cls, lec, weekdayName);
+        items.push({
+          kind: 'lecture', title: lec.title, cls, lec,
+          meetingStartTime: meeting.startTime,
+          meetingEndTime: meeting.endTime,
+          location: getLectureLocation(cls, lec),
+          professorName: getLectureProfessor(cls, lec),
+        });
       }
     }
     for (const a of (cls.assignments || [])) {
@@ -845,15 +924,6 @@ function getItemsForDate(sem, dateISO, filterClassId) {
       }
     }
 
-    // §1.3 — stamp the class's meeting time onto the first lecture already
-    // on this date, when this date matches the class's recurring schedule.
-    // No lecture, no stamp: nothing is invented on days without real data,
-    // and a makeup lecture on an off-schedule day stays untimed, same as
-    // lectures always have.
-    if (firstLectureItemToday && classMeetsOnDate(cls, dateISO, weekdayName)) {
-      firstLectureItemToday.meetingStartTime = cls.meetingStartTime;
-      firstLectureItemToday.meetingEndTime   = cls.meetingEndTime;
-    }
   }
   return items;
 }
@@ -1418,6 +1488,15 @@ class HoldCoursePlugin extends Plugin {
       notes: '',
       vaultLink: '',
       assignments: [],
+      // #41 — per-lecture overrides of the class's own meetingStartTime/
+      // meetingEndTime/location/professorName. Empty means "inherit the
+      // class's value" (see getLectureMeeting/getLectureLocation/
+      // getLectureProfessor); not a separate "unset" sentinel, matching
+      // every other optional string field in this schema.
+      meetingStartTime: (lectureData.meetingStartTime || '').trim(),
+      meetingEndTime: (lectureData.meetingEndTime || '').trim(),
+      location: (lectureData.location || '').trim(),
+      professorName: (lectureData.professorName || '').trim(),
     };
     cls.lectures.push(lec);
     return lec;
@@ -2666,9 +2745,29 @@ class HoldCourseView extends ItemView {
     // Title
     content.createDiv({ cls: 'hc-lecture-detail-title', text: lec.title });
 
+    // #41 — time/location/instructor: this lecture's own override if it has
+    // one, else the class's (see getLectureMeeting/getLectureLocation/
+    // getLectureProfessor) — same effective-value logic the calendar uses,
+    // so this screen and the calendar never disagree about what applies.
+    // Computed before the Date div below so it can pick the right spacing
+    // depending on whether a meta line will actually follow it.
+    const meeting = getLectureMeeting(cls, lec);
+    const metaParts = [];
+    if (meeting.startTime && meeting.endTime) metaParts.push(formatTimeRange(meeting.startTime, meeting.endTime));
+    const effectiveLocation = getLectureLocation(cls, lec);
+    if (effectiveLocation) metaParts.push(effectiveLocation);
+    const effectiveProfessor = getLectureProfessor(cls, lec);
+    if (effectiveProfessor) metaParts.push(effectiveProfessor);
+
     // Date
     if (lec.date) {
-      content.createDiv({ cls: 'hc-lecture-detail-date', text: formatDateLong(lec.date) });
+      content.createDiv({
+        cls: metaParts.length ? 'hc-lecture-detail-date hc-lecture-detail-date--tight' : 'hc-lecture-detail-date',
+        text: formatDateLong(lec.date),
+      });
+    }
+    if (metaParts.length) {
+      content.createDiv({ cls: 'hc-lecture-detail-meta', text: metaParts.join(' · ') });
     }
 
     // Status + actions row
@@ -5312,6 +5411,13 @@ class HoldCourseView extends ItemView {
         info.createDiv({ cls: 'hc-cal-popover-time', text: formatTimeRange(item.meetingStartTime, item.meetingEndTime) });
       }
 
+      // #41 — this lecture's own location/professor if set, else the
+      // class's. Both already resolved onto the item by getItemsForDate().
+      if (item.kind === 'lecture' && (item.location || item.professorName)) {
+        const parts = [item.location, item.professorName].filter(Boolean);
+        info.createDiv({ cls: 'hc-cal-popover-time', text: parts.join(' · ') });
+      }
+
       // Class code in muted text
       info.createDiv({ cls: 'hc-cal-popover-class', text: item.cls.code });
 
@@ -5628,6 +5734,21 @@ class DeleteSemesterModal extends Modal {
   }
 
   onClose() { this.contentEl.empty(); }
+}
+
+// #41 — shared by AddLectureModal and EditLectureModal. A lecture's time
+// override doesn't need the date-range checks validateClassSchedule below
+// does (a lecture already has its own single `date`), just the two rules
+// that are meaningless to skip: both-or-neither, and end after start.
+function validateLectureTime(meetingStartTime, meetingEndTime) {
+  if (!meetingStartTime && !meetingEndTime) return null;
+  if (!meetingStartTime || !meetingEndTime) {
+    return 'Both start and end time are required together.';
+  }
+  if (meetingEndTime <= meetingStartTime) {
+    return 'End time must be after start time.';
+  }
+  return null;
 }
 
 // Shared by AddClassModal and EditClassModal. Date range is required once a
@@ -6150,7 +6271,10 @@ class AddLectureModal extends Modal {
     this.semesterId = semesterId;
     this.classId = classId;
     this.onSave = onSave;
-    this.formData = { title: '', date: '' };
+    this.formData = {
+      title: '', date: '',
+      meetingStartTime: '', meetingEndTime: '', location: '', professorName: '',
+    };
   }
 
   onOpen() {
@@ -6197,11 +6321,38 @@ class AddLectureModal extends Modal {
       text.inputEl.addEventListener('change', e => checkPosition(e.target.value));
     });
 
-    this._renderFooter(contentEl, 'Add lecture', () => this._save());
+    // #41 — all four fields below are overrides: left untouched, the
+    // lecture inherits the class's own value (see getLectureMeeting/
+    // getLectureLocation/getLectureProfessor). The time pickers display
+    // the class's time as their starting point precisely so leaving them
+    // alone reads as "inherit", not "no time" — see renderTimePicker's own
+    // doc comment (only fires onChange on genuine interaction).
+    const timeError = contentEl.createDiv('hc-lecture-reorder-warning');
+    timeError.style.display = 'none';
+    renderTimePicker(contentEl, 'Start time (optional)', cls?.meetingStartTime || '', v => this.formData.meetingStartTime = v);
+    renderTimePicker(contentEl, 'End time (optional)', cls?.meetingEndTime || '', v => this.formData.meetingEndTime = v);
+    if (cls?.meetingStartTime && cls?.meetingEndTime) {
+      contentEl.createDiv({
+        cls: 'hc-modal-hint',
+        text: `Leave as-is to use the class's usual time (${formatTimeRange(cls.meetingStartTime, cls.meetingEndTime)}).`,
+      });
+    }
+
+    new Setting(contentEl).setName('Location (optional)').addText(text => {
+      text.setPlaceholder(cls?.location || 'Room 214 or Zoom').onChange(v => this.formData.location = v);
+    });
+
+    new Setting(contentEl).setName('Instructor (optional)').addText(text => {
+      text.setPlaceholder(cls?.professorName || 'Dr. Sarah Cohen').onChange(v => this.formData.professorName = v);
+    });
+
+    this._renderFooter(contentEl, 'Add lecture', () => this._save(timeError));
   }
 
-  _save() {
+  _save(timeError) {
     if (!this.formData.title.trim()) { new Notice('Lecture title is required.'); return; }
+    const err = validateLectureTime(this.formData.meetingStartTime, this.formData.meetingEndTime);
+    if (err) { timeError.setText(`⚠ ${err}`); timeError.style.display = 'block'; return; }
     this.plugin.addLecture(this.semesterId, this.classId, this.formData);
     this.onSave();
     this.close();
@@ -6218,7 +6369,11 @@ class EditLectureModal extends Modal {
     this.classId = classId;
     this.lec = lec;
     this.onSave = onSave;
-    this.formData = { title: lec.title || '', date: lec.date || '' };
+    this.formData = {
+      title: lec.title || '', date: lec.date || '',
+      meetingStartTime: lec.meetingStartTime || '', meetingEndTime: lec.meetingEndTime || '',
+      location: lec.location || '', professorName: lec.professorName || '',
+    };
   }
 
   onOpen() {
@@ -6268,14 +6423,42 @@ class EditLectureModal extends Modal {
       text.inputEl.addEventListener('change', e => checkReorder(e.target.value));
     });
 
-    this._renderFooter(contentEl, 'Save changes', () => this._save());
+    // #41 — same override-with-inherited-default pattern as AddLectureModal;
+    // see its own comment. Here the picker's starting point is the
+    // lecture's OWN value if it already has one, else the class's.
+    const timeError = contentEl.createDiv('hc-lecture-reorder-warning');
+    timeError.style.display = 'none';
+    renderTimePicker(contentEl, 'Start time (optional)', this.formData.meetingStartTime || cls?.meetingStartTime || '', v => this.formData.meetingStartTime = v);
+    renderTimePicker(contentEl, 'End time (optional)', this.formData.meetingEndTime || cls?.meetingEndTime || '', v => this.formData.meetingEndTime = v);
+    if (cls?.meetingStartTime && cls?.meetingEndTime) {
+      contentEl.createDiv({
+        cls: 'hc-modal-hint',
+        text: `Leave as-is to use the class's usual time (${formatTimeRange(cls.meetingStartTime, cls.meetingEndTime)}).`,
+      });
+    }
+
+    new Setting(contentEl).setName('Location (optional)').addText(text => {
+      text.setPlaceholder(cls?.location || 'Room 214 or Zoom').setValue(this.formData.location).onChange(v => this.formData.location = v);
+    });
+
+    new Setting(contentEl).setName('Instructor (optional)').addText(text => {
+      text.setPlaceholder(cls?.professorName || 'Dr. Sarah Cohen').setValue(this.formData.professorName).onChange(v => this.formData.professorName = v);
+    });
+
+    this._renderFooter(contentEl, 'Save changes', () => this._save(timeError));
   }
 
-  _save() {
+  _save(timeError) {
     if (!this.formData.title.trim()) { new Notice('Lecture title is required.'); return; }
+    const err = validateLectureTime(this.formData.meetingStartTime, this.formData.meetingEndTime);
+    if (err) { timeError.setText(`⚠ ${err}`); timeError.style.display = 'block'; return; }
     this.plugin.updateLecture(this.semesterId, this.classId, this.lec.id, {
       title: this.formData.title.trim(),
       date: this.formData.date,
+      meetingStartTime: this.formData.meetingStartTime,
+      meetingEndTime: this.formData.meetingEndTime,
+      location: this.formData.location.trim(),
+      professorName: this.formData.professorName.trim(),
     });
     this.onSave();
     this.close();
@@ -7673,6 +7856,10 @@ Object.assign(module.exports, {
   buildNoteStub,
   mergeResourceFrontmatter,
   applyFrontmatterToResource,
+  getLectureMeeting,
+  getLectureLocation,
+  getLectureProfessor,
+  validateLectureTime,
 });
 
 /* nosourcemap */
