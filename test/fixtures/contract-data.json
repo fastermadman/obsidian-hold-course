@@ -1,0 +1,118 @@
+{
+  "currentSemesterId": "sem-1",
+  "dataVersion": 2,
+  "semesters": [
+    {
+      "id": "sem-1",
+      "name": "Fall 2026",
+      "term": "Fall",
+      "year": 2026,
+      "vswSync": "sem-1",
+      "resources": [
+        {
+          "id": "res-1",
+          "title": "Frede V Nielsen — Ars og Scientia",
+          "author": "",
+          "type": "",
+          "classIds": ["cls-1"],
+          "status": "",
+          "vaultLink": "§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md",
+          "url": "",
+          "notes": "",
+          "vswResKey": "§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md"
+        }
+      ],
+      "classes": [
+        {
+          "id": "cls-1",
+          "colorIndex": 5,
+          "code": "♪ LSmu-2527",
+          "name": "Musik",
+          "professorName": "",
+          "professorEmail": "",
+          "officeHours": "",
+          "taName": "",
+          "taEmail": "",
+          "taOfficeHours": "",
+          "meetingDays": [],
+          "location": "",
+          "startDate": "2026-09-01",
+          "endDate": "2026-12-20",
+          "meetingStartTime": "",
+          "meetingEndTime": "",
+          "courseUrl": "https://via.itslearning.com/Course/Course.aspx?CourseId=36016",
+          "vswFag": "Musik",
+          "vswCourseUrl": "https://via.itslearning.com/Course/Course.aspx?CourseId=36016",
+          "exams": [
+            {
+              "id": "exam-1",
+              "title": "Written exam",
+              "dueDate": "2026-12-18",
+              "notes": "",
+              "grade": "",
+              "status": "not-started"
+            }
+          ],
+          "assignments": [
+            {
+              "id": "asg-class-1",
+              "title": "Studieopgave",
+              "type": "Writing",
+              "dueDate": "2026-10-01",
+              "status": "not-started",
+              "notes": "",
+              "grade": "",
+              "linkedBook": "",
+              "linkedNote": ""
+            }
+          ],
+          "lectures": [
+            {
+              "id": "lec-1",
+              "title": "Musikforståelse",
+              "date": "2026-09-01",
+              "status": "not-started",
+              "notes": "",
+              "description": "Undervisernes beskrivelse: af lektionen.",
+              "vaultLink": "§ FAG/♪ Musik/NOTER/[NOTE] 2026-09-01 - Musikforståelse.md",
+              "notesLink": "§ FAG/♪ Musik/NOTER/[NOTE] 2026-09-01 - Musikforståelse.md",
+              "meetingStartTime": "08:15",
+              "meetingEndTime": "11:00",
+              "location": "Lokale A1.42",
+              "professorName": "Frede V Nielsen",
+              "vswPlanId": "36016:1235133",
+              "vswDescription": "Undervisernes beskrivelse: af lektionen.",
+              "vswVaultLink": "§ FAG/♪ Musik/NOTER/[NOTE] 2026-09-01 - Musikforståelse.md",
+              "assignments": [
+                {
+                  "id": "asg-read-1",
+                  "title": "Frede V Nielsen Ars og Scientia",
+                  "type": "Reading",
+                  "dueDate": "2026-09-01",
+                  "status": "not-started",
+                  "notes": "",
+                  "grade": "",
+                  "linkedBook": "res-1",
+                  "linkedNote": "§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md",
+                  "vswKey": "lec-1|lit|§ FAG/♪ Musik/MD/Musikforståelse/Frede V Nielsen.md"
+                },
+                {
+                  "id": "asg-prep-1",
+                  "title": "Forberedelse",
+                  "type": "Preparation",
+                  "dueDate": "2026-09-01",
+                  "status": "not-started",
+                  "notes": "",
+                  "grade": "",
+                  "linkedBook": "",
+                  "linkedNote": "§ FAG/♪ Musik/NOTER/[NOTE] 2026-09-01 - Musikforståelse.md",
+                  "vswKey": "lec-1|forb|Forberedelse"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
