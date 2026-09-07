@@ -286,6 +286,18 @@ function compareSemestersByTimeline(a, b, dir = 1) {
 // old file simply has no such keys and every semester is visible, which is the
 // correct answer already. The stamp ships anyway, and in the same commit, so the
 // number never describes a coverage it does not have.
+//
+// Bump rule (hold-course#63 / viastudywiz-extension#182). This is now a live
+// compatibility contract with sync_hold_course.py, not just a one-shot migration
+// flag. Bump this AND the mirrored KNOWN_DATA_VERSION in sync_hold_course.py, in
+// coordinated commits, whenever a data.json change is NOT backward-safe for the
+// other side: a field the reader must have, or an existing field/value whose
+// meaning changed. Purely additive, presence-based fields that an older reader
+// safely ignores (#41's lecture time/location/instructor, #54's 'Preparation'
+// type) may skip the bump — but say so in the commit; skipping is not the default.
+// A file stamped higher than this constant was written by a newer sync and is
+// flagged by the load-time guard in onload(); lower still runs _migrateDataVersion.
+// Canonical contract: ValdiVault/10_Projects/VIAstudyWiz/14-hold-course-synk.md.
 const CURRENT_DATA_VERSION = 2;
 
 // A semester is hidden from the switcher when the key is present. Absent = visible,
@@ -1216,6 +1228,20 @@ class HoldCoursePlugin extends Plugin {
     this.applyTimeFormat();
 
     this.addSettingTab(new HoldCourseSettingTab(this.app, this));
+
+    // Load-time schema guard (hold-course#63). A data.json stamped higher than
+    // this build knows was written by a newer sync_hold_course.py — a field or
+    // value in it may mean something this code doesn't expect. Warn loudly but
+    // still load: locking the user out of their own course view over a version
+    // skew is worse than rendering it with one unfamiliar key ignored. The
+    // sibling guard in sync_hold_course.py is the strict half — it refuses to
+    // write. Lower/absent versions fall through to _migrateDataVersion as before.
+    if (typeof this.data.dataVersion === 'number' && this.data.dataVersion > CURRENT_DATA_VERSION) {
+      const msg = `Hold Course: data.json is version ${this.data.dataVersion}, but this build only knows ${CURRENT_DATA_VERSION}. `
+        + `It was written by a newer sync. Update the plugin (install.sh) — some fields may not render correctly until you do.`;
+      console.warn(msg);
+      new Notice(msg, 10000);
+    }
 
     // Additive migrations: only ever write keys that were absent. saveData
     // directly rather than save() — no views exist yet at this point.
@@ -8595,6 +8621,7 @@ module.exports = HoldCoursePlugin;
 // Obsidian only uses the default export; these are attached so pure logic
 // can be unit-tested without starting the app. See test/.
 Object.assign(module.exports, {
+  CURRENT_DATA_VERSION,
   openVaultNote,
   ConfirmReloadModal,
   getGlobalAssignments,
