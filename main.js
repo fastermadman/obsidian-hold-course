@@ -1199,7 +1199,16 @@ function markClassRuns(items) {
 function calLegendFilterPasses(item, filterClassIds, filterTypes) {
   if (!filterClassIds[item.cls.id]) return false;
   if (item.kind === 'exam')       return !!filterTypes['Exam'];
-  if (item.kind === 'assignment') return !!filterTypes[item.assignment.type];
+  // #68 — fold a type with no legend dot ('Quiz' from external data, or none
+  // at all) into 'Other'. Indexing on the raw type yielded undefined for those,
+  // so they vanished from both grids with no toggle that could bring them back.
+  // 'Other' is the same fallback getTypeStyle()/typeIcon() already use, and the
+  // only key the user can actually reach. calItemTypeKey() itself stays as-is:
+  // the calendar pill still draws Quiz's own icon through it.
+  if (item.kind === 'assignment') {
+    const key = calItemTypeKey(item);
+    return !!filterTypes[CAL_LEGEND_TYPES.includes(key) ? key : 'Other'];
+  }
   return true; // lecture — class check above is the only gate
 }
 

@@ -44,3 +44,23 @@ test('isWeekendDate: Saturday/Sunday true, weekdays false', () => {
   assert.equal(isWeekendDate(new Date('2026-09-06T12:00:00')), true);  // Sunday
   assert.equal(isWeekendDate(new Date('2026-09-07T12:00:00')), false); // Monday
 });
+
+// #68 — the legend only has dots for CAL_LEGEND_TYPES, so a type outside that
+// list has no toggle that could ever reveal it. External data is the source:
+// in-app creation always defaults to 'Other'.
+test('a type with no legend dot folds into the "Other" toggle', () => {
+  const classesOn = { a: true };
+  const allOn  = { Reading: true,  Writing: true,  Discussion: true,  Project: true,  Exam: true,  Preparation: true,  Other: true  };
+  const allOff = { Reading: false, Writing: false, Discussion: false, Project: false, Exam: false, Preparation: false, Other: false };
+
+  // 'Quiz' has a style and an icon (ASSIGNMENT_TYPE_STYLE/ICON) but no legend dot.
+  assert.equal(calLegendFilterPasses(assignment(CLS_A, 'Quiz'), classesOn, allOn), true);
+  assert.equal(calLegendFilterPasses(assignment(CLS_A, 'Quiz'), classesOn, allOff), false);
+
+  // A missing type — what sync_hold_course.py can write — behaves the same.
+  assert.equal(calLegendFilterPasses(assignment(CLS_A, undefined), classesOn, allOn), true);
+  assert.equal(calLegendFilterPasses(assignment(CLS_A, undefined), classesOn, allOff), false);
+
+  // Folding into Other means the Other dot alone governs it.
+  assert.equal(calLegendFilterPasses(assignment(CLS_A, 'Quiz'), classesOn, { ...allOn, Other: false }), false);
+});
