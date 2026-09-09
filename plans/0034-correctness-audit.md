@@ -1,15 +1,16 @@
 ---
 issue: 34
 title: "Full-plugin correctness/consistency pass on main.js (post #14 follow-ups)"
-status: designed    # designed | in-progress | shipped | superseded
+status: shipped    # designed | in-progress | shipped | superseded
 created: 2026-09-09T00:00:00Z
 updated: 2026-09-09T00:00:00Z
 author: Claude Opus 5
 repo: fastermadman/obsidian-hold-course
 milestone: null
-branch: null
+branch: 34-correctness-audit (merget som 600d72e, PR #75)
 depends_on: [14]
 related_issues: [15, 16, 17, 33, 35]
+filed_from_this: [66, 67, 68, 69, 70, 71, 72, 73, 74]
 labels: [model:opus, effort:high]
 ---
 
