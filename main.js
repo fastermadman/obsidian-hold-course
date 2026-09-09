@@ -1399,10 +1399,20 @@ class HoldCoursePlugin extends Plugin {
   // building the merge path preemptively. (LiveAQuietLife/Claude,
   // 2026-08-30 — see issue #2)
   async onExternalSettingsChange() {
+    // #73: capture any focused-but-unsaved notes field BEFORE the swap below
+    // orphans the entity its blur handler points at, then reapply it to the
+    // fresh graph after the repaint. See HoldCourseView's unsaved-notes block.
+    const views = this.app.workspace.getLeavesOfType(VIEW_TYPE)
+      .map(leaf => leaf.view)
+      .filter(view => view instanceof HoldCourseView);
+    const pending = views.map(view => view._captureDirtyNote());
+
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
     delete this.data.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
     this.refreshTodayView();
     this.refreshMainView();
+
+    views.forEach((view, i) => { if (pending[i]) view._restoreDirtyNote(pending[i]); });
   }
 
   async activateView() {
@@ -2339,6 +2349,108 @@ class HoldCourseView extends ItemView {
 
   refresh() { this.render(); }
 
+  // ─── Unsaved-notes protection (#73) ──────────────────────────────────────
+  //
+  // Every notes <textarea> in this view persists its text on `blur` only.
+  // Two things pull the DOM out from under a focused, still-unsaved field:
+  //
+  //   1. render() → contentEl.empty() removes the element, and empty() does
+  //      not fire blur. Reached without a preceding in-pane click via
+  //      refreshAllViews() — an eink / time-format / mobile-scale toggle in
+  //      the settings tab while this view sits in another pane.
+  //   2. onExternalSettingsChange() replaces plugin.data wholesale when the
+  //      user's sync script rewrites data.json (its normal per-minute
+  //      rhythm), then repaints. After that swap the blur handler's captured
+  //      entity is an orphan of the discarded graph, so even a blur that
+  //      does fire writes the text where no save() will pick it up.
+  //
+  // _flushFocusedNote() covers (1): blur the field so its own handler runs
+  // before empty(). It also fully covers file-backed notes (_renderFileNote)
+  // in both paths — those write to the vault, not plugin.data, so the swap
+  // never touches them.
+  //
+  // _captureDirtyNote()/_restoreDirtyNote() cover (2) for the JSON-backed
+  // fields: read the pending text before the swap, then re-resolve the
+  // entity in the fresh graph and write it back. Only the one focused field
+  // can hold unsaved text — every other field is already on disk — so this
+  // is a single-field merge, not the full field-by-field data-load rework
+  // that #2 deliberately deferred.
+
+  _focusedNoteEl() {
+    return this.contentEl
+      ? this.contentEl.querySelector('textarea.hc-lecture-notes:focus')
+      : null;
+  }
+
+  _flushFocusedNote() {
+    const el = this._focusedNoteEl();
+    if (el) el.blur();
+  }
+
+  // The JSON-backed notes field on the current screen as { obj, key }, or
+  // null when the screen's note is file-backed or can't be resolved. Reads
+  // live plugin.data on every call, so it is valid on either side of a swap.
+  _resolveNoteTarget() {
+    const sem = this._getViewedSemester();
+    if (!sem) return null;
+    const cls = (sem.classes || []).find(c => c.id === this.currentClassId);
+    const fileMode = this.plugin.data.fileIsTruth === true;
+    switch (this.screen) {
+      case 'assignment': {
+        if (!cls) return null;
+        const r = this.plugin.findAssignment(sem.id, cls.id, this.currentAssignmentId);
+        return r ? { obj: r.assignment, key: 'notes' } : null;
+      }
+      case 'exam': {
+        if (!cls) return null;
+        const exam = this.plugin.findExam(sem.id, cls.id, this.currentExamId);
+        return exam ? { obj: exam, key: 'notes' } : null;
+      }
+      case 'lecture': {
+        if (fileMode || !cls) return null; // file-backed: written straight to the vault
+        const lec = (cls.lectures || []).find(l => l.id === this.currentLectureId);
+        return lec ? { obj: lec, key: 'notes' } : null;
+      }
+      case 'resource': {
+        if (fileMode) return null;
+        const res = this.plugin.findResource(sem.id, this.currentResourceId);
+        return res ? { obj: res, key: 'notes' } : null;
+      }
+      default:
+        return null;
+    }
+  }
+
+  _captureDirtyNote() {
+    const el = this._focusedNoteEl();
+    if (!el) return null;
+    const target = this._resolveNoteTarget();
+    if (!target) return null;                                      // file-backed: nothing to carry
+    if ((target.obj[target.key] || '') === el.value) return null;  // unchanged since last blur
+    return {
+      screen: this.screen,
+      value: el.value,
+      selStart: el.selectionStart,
+      selEnd: el.selectionEnd,
+    };
+  }
+
+  _restoreDirtyNote(pending) {
+    if (!pending || this.screen !== pending.screen) return;        // navigated away during the reload
+    const target = this._resolveNoteTarget();
+    if (!target) return;
+    if ((target.obj[target.key] || '') === pending.value) return;  // fresh data already matches
+    target.obj[target.key] = pending.value;
+    this.plugin.save();
+    const el = this._focusedNoteEl()
+      || (this.contentEl && this.contentEl.querySelector('textarea.hc-lecture-notes'));
+    if (el) {
+      el.value = pending.value;
+      el.focus();
+      try { el.setSelectionRange(pending.selStart, pending.selEnd); } catch (e) { /* detached */ }
+    }
+  }
+
   _getScrollEl() {
     // Guards a view that hasn't rendered yet — navigate() can in principle
     // run before the first render() (and does, under test, where contentEl
@@ -2372,6 +2484,7 @@ class HoldCourseView extends ItemView {
     const wasInRender = this._inRender;
     this._inRender = true;
 
+    this._flushFocusedNote(); // #73: blur a focused notes field so it saves before empty() removes it
     this.contentEl.empty();
     const root = this.contentEl.createDiv('hc-root');
 
