@@ -679,7 +679,14 @@ function splitBulkLine(line, defaultYear) {
 function parseBulkLectures(text, opts) {
   const startDate = (opts && opts.startDate) || '';
   const meetingDays = (opts && opts.meetingDays) || [];
-  const patternActive = !!startDate && meetingDays.length > 0;
+  // #66: gate on the day *numbers*, not the raw names. A meetingDays entry
+  // outside {Mon..Sun} — a full "Monday" from sync_hold_course.py or a
+  // hand-edited data.json, since the chip picker only ever writes DAYS —
+  // passes a .length check but drops out of this filter, leaving
+  // patternActive true with nothing for nextSlot() to land on: an unbounded
+  // loop on the UI thread.
+  const dayNums = meetingDays.map(d => BULK_DAY_NUM[d]).filter(n => n !== undefined);
+  const patternActive = !!startDate && dayNums.length > 0;
   const defaultYear = startDate ? +startDate.slice(0, 4) : new Date().getFullYear();
 
   let lines = text.split('\n').map(l => l.replace(/\s+$/, ''));
@@ -688,12 +695,16 @@ function parseBulkLectures(text, opts) {
 
   let cursor = null;
   if (patternActive) {
-    const dayNums = meetingDays.map(d => BULK_DAY_NUM[d]).filter(n => n !== undefined);
     const start = new Date(startDate + 'T12:00:00');
     cursor = { date: start, dayNums };
   }
   const nextSlot = () => {
-    while (!cursor.dayNums.includes(cursor.date.getDay())) cursor.date.setDate(cursor.date.getDate() + 1);
+    // Bound the scan at 7 — a full week covers any weekday set. dayNums is
+    // non-empty whenever patternActive, so this cap is belt-and-braces.
+    let guard = 0;
+    while (!cursor.dayNums.includes(cursor.date.getDay()) && guard++ < 7) {
+      cursor.date.setDate(cursor.date.getDate() + 1);
+    }
     const iso = makeISO(cursor.date.getFullYear(), cursor.date.getMonth() + 1, cursor.date.getDate());
     cursor.date.setDate(cursor.date.getDate() + 1);
     return iso;
@@ -8759,6 +8770,7 @@ Object.assign(module.exports, {
   ASSIGNMENT_TYPES,
   isWeekendDate,
   getISOWeekNumber,
+  parseBulkLectures,
 });
 
 /* nosourcemap */
