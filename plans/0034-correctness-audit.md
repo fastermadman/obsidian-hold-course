@@ -19,6 +19,22 @@ Read-only pass over all 8,651 lines at commit `4f36929`. Method is #34's own: tr
 state and clicks through the code, not a complexity scan. Baseline: `node --test
 test/*.test.js` → 88/88 pass, both before and after (nothing was changed).
 
+## Method note: `improve` was not run
+
+#34 step 5 says to use the `improve` skill for the survey. It wasn't run, deliberately —
+recording that here so a later session doesn't re-run it looking for a missing artefact.
+
+`improve` produces "prioritized, self-contained implementation plans for OTHER
+models/agents to execute", read-only. That is exactly the shape of §3 and §5 below and of
+the nine issues filed from them: each carries `file:line`, a concrete failure scenario and
+a fix sketch, and is self-contained enough to hand off cold. Running it after the fact
+would re-derive the same ground *without* the click-trace that found most of these — #34's
+own framing says the method is tracing, not scanning, because that is what found #33.
+
+Its extra breadth (test coverage, security, DX, roadmap) is out of scope by #34's own
+"Out of scope" section. If a future pass wants that breadth, it is a different issue, not
+a re-run of this one.
+
 ## Timing caveat
 
 #34's own Timing section says to run this *after* #15, #16, #17 and #33 land. All four
