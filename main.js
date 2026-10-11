@@ -504,9 +504,21 @@ function getAllAssignments(semester) {
 // Lectures are excluded on purpose: a lecture is a scheduled event, not a
 // deadline; the calendar owns events. `kind` routes each row's click to the
 // right detail screen.
+//
+// #71: completed and dropped classes are skipped, the same rule
+// getItemsForDate applies to every other date-driven surface — a class the
+// user has finished or dropped stops producing deadlines everywhere at once.
 function getAllDeadlineItems(semester) {
-  const all = getAllAssignments(semester).map(a => ({ ...a, kind: 'assignment' }));
+  const inactive = new Set(
+    (semester.classes || [])
+      .filter(c => c.status === 'completed' || c.status === 'dropped')
+      .map(c => c.id)
+  );
+  const all = getAllAssignments(semester)
+    .filter(a => !inactive.has(a.classId))
+    .map(a => ({ ...a, kind: 'assignment' }));
   for (const cls of (semester.classes || [])) {
+    if (inactive.has(cls.id)) continue;
     for (const e of (cls.exams || [])) {
       all.push({
         ...e, kind: 'exam',
@@ -591,6 +603,30 @@ function getLecturesSorted(cls) {
     if (!b.date) return -1;
     return a.date.localeCompare(b.date);
   });
+}
+
+// #69 — the class Lectures tab's rows, in on-screen order: sort direction
+// first, then the hide-done toggle. Shared by _renderLectureList and
+// _originSequence so prev/next can't drift from what the list shows.
+function getLecturesDisplayed(cls) {
+  const sorted = getLecturesSorted(cls);
+  const ordered = cls.lectureSort === 'desc' ? sorted.reverse() : sorted;
+  const showDone = cls.lectureShowDone !== false;
+  return ordered.filter(lec => showDone || lec.status !== 'done');
+}
+
+// #70 — the lecture detail screen's two sections, Readings and Assignments,
+// each after its own hide-done flag (the class tabs' flags, see
+// _renderLectureDetail). Shared with _originSequence, which walks Readings
+// then Assignments — the same top-to-bottom order the screen shows.
+function getLectureAssignmentSections(cls, lec) {
+  const all = lec.assignments || [];
+  const readingsShowDone = cls.readingsShowDone !== false;
+  const assignShowDone = cls.assignShowDone !== false;
+  return {
+    readings: all.filter(a => a.type === 'Reading' && (readingsShowDone || a.status !== 'done')),
+    assignments: all.filter(a => a.type !== 'Reading' && (assignShowDone || a.status !== 'done')),
+  };
 }
 
 // ─── Bulk lecture paste parsing ───────────────────────────────────────────────
@@ -2793,13 +2829,9 @@ class HoldCourseView extends ItemView {
       // (readingsShowDone/assignShowDone, added alongside this fix) — same
       // reasoning as the class-tab branch below: a "next" click must not
       // land on a row the screen you were looking at had actually hidden.
-      const readingsShowDone = cls.readingsShowDone !== false;
-      const assignShowDone = cls.assignShowDone !== false;
-      const items = (lec.assignments || [])
-        .filter(a => {
-          const showDone = a.type === 'Reading' ? readingsShowDone : assignShowDone;
-          return showDone || a.status !== 'done';
-        })
+      // #70: Readings section first, then Assignments, as rendered.
+      const { readings, assignments } = getLectureAssignmentSections(cls, lec);
+      const items = [...readings, ...assignments]
         .map(a => ({ screen: 'assignment', classId: cls.id, lectureId: lec.id, assignmentId: a.id }));
       const index = items.findIndex(it => it.assignmentId === this.currentAssignmentId);
       return index === -1 ? null : { items, index };
@@ -2813,10 +2845,8 @@ class HoldCourseView extends ItemView {
         // Mirrors _renderLectureList's own cls.lectureShowDone filter — same
         // "found on-device" gap as the two branches above: this one already
         // had a working toggle, it just wasn't being read here.
-        const showDone = cls.lectureShowDone !== false;
-        let sorted = getLecturesSorted(cls);
-        if (!showDone) sorted = sorted.filter(l => l.status !== 'done');
-        const items = sorted.map(l => ({ screen: 'lecture', classId: cls.id, lectureId: l.id }));
+        // #69: and its cls.lectureSort direction, via the same helper.
+        const items = getLecturesDisplayed(cls).map(l => ({ screen: 'lecture', classId: cls.id, lectureId: l.id }));
         const index = items.findIndex(it => it.lectureId === this.currentLectureId);
         return index === -1 ? null : { items, index };
       }
@@ -3440,9 +3470,8 @@ class HoldCourseView extends ItemView {
     if (cls.lectureShowDone === undefined) cls.lectureShowDone = true;
     const showDone = cls.lectureShowDone;
     const sortDesc = cls.lectureSort === 'desc';
-    const sorted = getLecturesSorted(cls);
-    const displayed = (sortDesc ? [...sorted].reverse() : sorted)
-      .filter(lec => showDone || lec.status !== 'done');
+    const sorted = getLecturesSorted(cls); // chronological numbering below
+    const displayed = getLecturesDisplayed(cls);
 
     const controlRow = content.createDiv('hc-lecture-controls');
 
@@ -3745,7 +3774,6 @@ class HoldCourseView extends ItemView {
     // before; only the grouping and labels changed. Both show an explicit
     // empty state rather than disappearing, so the structure is visible
     // even before anything's been added. (LiveAQuietLife, 2026-09-01)
-    const lecAssignments = lec.assignments || [];
 
     // Hide-done reuses the SAME flags as the class's Readings/Assignments
     // tabs (cls.readingsShowDone/cls.assignShowDone) rather than a new,
@@ -3769,9 +3797,8 @@ class HoldCourseView extends ItemView {
       this.plugin.save();
       this.render();
     });
+    const { readings, assignments } = getLectureAssignmentSections(cls, lec);
     const readingList = content.createDiv('hc-lecture-assign-list');
-    let readings = lecAssignments.filter(a => a.type === 'Reading');
-    if (!readingsShowDone) readings = readings.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       readingList,
       readings,
@@ -3791,8 +3818,6 @@ class HoldCourseView extends ItemView {
       this.render();
     });
     const assignList = content.createDiv('hc-lecture-assign-list');
-    let assignments = lecAssignments.filter(a => a.type !== 'Reading');
-    if (!assignShowDone) assignments = assignments.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       assignList,
       assignments,
@@ -4798,9 +4823,14 @@ class HoldCourseView extends ItemView {
 
     const list = content.createDiv('hc-resource-list');
 
-    if (resources.length === 0) {
+    if ((sem.resources || []).length === 0) {
       const empty = list.createDiv('hc-empty');
       empty.createDiv({ cls: 'hc-empty-text', text: 'No resources yet. Add your first one above.' });
+    } else if (resources.length === 0) {
+      // #72: resources exist, the class filter hid them all.
+      const empty = list.createDiv('hc-empty');
+      const filterCls = (sem.classes || []).find(c => c.id === this.libraryFilterClassId);
+      empty.createDiv({ cls: 'hc-empty-text', text: filterCls ? `No ${filterCls.code} resources.` : 'No resources for this class.' });
     } else {
       for (const resource of resources) {
         this._renderLibraryRow(list, resource, sem, cls);
@@ -5163,15 +5193,19 @@ class HoldCourseView extends ItemView {
       ta.addEventListener('blur', async () => {
         armSwallow();
         await this._writeNoteBody(file, ta.value);
-        render();
+        if (wrap.isConnected) render();
       });
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
     };
 
+    // #74: every await below can outlive this widget — a view re-render
+    // empties contentEl and detaches `wrap`. Painting into a detached node
+    // is invisible, so bail instead; the re-render built its own widget.
     const render = async () => {
       wrap.empty();
       const file = await this._resolveNoteFile(item.notesLink || '');
+      if (!wrap.isConnected) return;
 
       // No file yet: click the placeholder to create the stub and drop into it.
       if (!file) {
@@ -5183,13 +5217,14 @@ class HoldCourseView extends ItemView {
         preview.addEventListener('click', async () => {
           if (swallowNextClick) { swallowNextClick = false; return; }
           await this._createNoteStub(item, spec);
-          render();
+          if (wrap.isConnected) render();
         });
         return;
       }
 
       let raw = '';
       try { raw = await this.app.vault.read(file); } catch (e) { raw = ''; }
+      if (!wrap.isConnected) return;
       const body = splitFrontmatter(raw).body.trim();
       const owned = this._ownsNoteFile(file, item, spec.idKey);
 
@@ -5239,13 +5274,18 @@ class HoldCourseView extends ItemView {
     return file;
   }
 
-  // ponytail: notesLink-path match is the session-1 truth (we're the only
-  // writer of that field). The frontmatter id check (idKey) is the
-  // rename/move-proof path for re-matching a file the user moved.
+  // #67: the frontmatter id is the primary check — it's what the stub was
+  // stamped with, and it survives renames/moves. The notesLink-path match is
+  // only the fallback for a file whose frontmatter isn't indexed yet (or has
+  // no id at all). Path-first let two records share one file: moveClass's
+  // resource copy carries the original's notesLink, and would otherwise be
+  // allowed to overwrite the original's notes. Now the copy sees the shared
+  // note read-only, like any other file Hold Course didn't create for it.
   _ownsNoteFile(file, item, idKey = 'hc_resource_id') {
-    if (item.notesLink && file && item.notesLink === file.path) return true;
+    if (!file) return false;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    return !!fm && fm[idKey] === item.id;
+    if (fm && fm[idKey]) return fm[idKey] === item.id;
+    return !!item.notesLink && item.notesLink === file.path;
   }
 
   // #5b Del A read path: when the resource screen opens, pull hc_* values from
@@ -8759,6 +8799,8 @@ Object.assign(module.exports, {
   ConfirmReloadModal,
   getGlobalAssignments,
   getAllDeadlineItems,
+  getLecturesDisplayed,
+  getLectureAssignmentSections,
   HoldCourseView,
   normalizeSettings,
   splitFrontmatter,

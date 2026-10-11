@@ -46,3 +46,24 @@ test('no lecture rows leak in', () => {
   assert.ok(!items.some(i => i.id === 'l1'));
   assert.equal(items.length, 3);
 });
+
+// #71 — same rule as getItemsForDate: a completed or dropped class stops
+// producing deadlines, assignments and exams alike.
+for (const status of ['dropped', 'completed']) {
+  test(`a ${status} class contributes no deadline items`, () => {
+    const sem = makeSemester();
+    sem.classes[0].status = status;
+    assert.deepEqual(getAllDeadlineItems(sem), []);
+  });
+}
+
+test('an ongoing class next to a dropped one still contributes', () => {
+  const sem = makeSemester();
+  sem.classes.push({
+    id: 'c2', code: 'PHIL', status: 'dropped',
+    assignments: [{ id: 'x1', title: 'Dropped essay', dueDate: '2026-09-01', status: 'not-started' }],
+    lectures: [], exams: [{ id: 'x2', title: 'Dropped exam', dueDate: '2026-09-02', status: 'not-started' }],
+  });
+  const ids = getAllDeadlineItems(sem).map(i => i.id).sort();
+  assert.deepEqual(ids, ['a1', 'a2', 'e1']);
+});
