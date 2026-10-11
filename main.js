@@ -575,6 +575,19 @@ async function openVaultNote(app, path) {
 // the view type and the tab renders empty; there's no clean way to detect
 // that upfront without importing Horus's code, so this stays a no-frills
 // best-effort call rather than adding a "is Horus installed" check. #22.
+// The file a row's open/Horus buttons point at. An assignment's own Linked
+// Note wins; a Reading without one falls back to its linked Library book's
+// vault file. Without the fallback only readings that arrived with a
+// linkedNote already set (viastudywiz sync) got the buttons — a reading made
+// by hand and linked to a book via "Linked book" never did.
+function getAssignmentOpenPath(sem, a) {
+  const own = (a.linkedNote || '').trim();
+  if (own) return own;
+  if (a.type !== 'Reading' || !a.linkedBook) return '';
+  const res = ((sem && sem.resources) || []).find(r => r.id === a.linkedBook);
+  return ((res && res.vaultLink) || '').trim();
+}
+
 async function openInHorus(app, path) {
   const file = await resolveVaultFile(app, path);
   if (!file) return;
@@ -3882,13 +3895,14 @@ class HoldCourseView extends ItemView {
       // side instead of on top of each other, next to the due-date column.
       // Horus only for Readings (the assignment type that's actually a
       // book) — see _renderReadingRow for the same rule.
-      if ((a.linkedNote || '').trim()) {
+      const openPath = getAssignmentOpenPath(this._getViewedSemester(), a);
+      if (openPath) {
         const iconActions = aRow.createDiv('hc-row-icon-actions');
         const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
         setIcon(openBtn, 'external-link');
         openBtn.addEventListener('click', (evt) => {
           evt.stopPropagation();
-          openVaultNote(this.app, a.linkedNote);
+          openVaultNote(this.app, openPath);
         });
 
         if (a.type === 'Reading') {
@@ -3896,7 +3910,7 @@ class HoldCourseView extends ItemView {
           setIcon(horusBtn, HORUS_ICON_ID);
           horusBtn.addEventListener('click', (evt) => {
             evt.stopPropagation();
-            openInHorus(this.app, a.linkedNote);
+            openInHorus(this.app, openPath);
           });
         }
       }
@@ -4208,22 +4222,25 @@ class HoldCourseView extends ItemView {
     // inside `mid`, which stacks its children as block text) so they sit
     // side by side next to the due-date column instead of on top of each
     // other. Every Reading here is a book, so Horus always applies.
-    if ((assignment.linkedNote || '').trim()) {
-      mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
+    const openPath = getAssignmentOpenPath(sem, assignment);
+    if (openPath) {
+      if ((assignment.linkedNote || '').trim()) {
+        mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
+      }
 
       const iconActions = row.createDiv('hc-row-icon-actions');
       const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
-        openVaultNote(this.app, assignment.linkedNote);
+        openVaultNote(this.app, openPath);
       });
 
       const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
       setIcon(horusBtn, HORUS_ICON_ID);
       horusBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
-        openInHorus(this.app, assignment.linkedNote);
+        openInHorus(this.app, openPath);
       });
     }
 
@@ -4354,15 +4371,16 @@ class HoldCourseView extends ItemView {
     // Readings — that's the assignment type that's actually a book, so it's
     // the one Horus (a book reader) makes sense for; to start with, at
     // least (easy to widen to Writing too if that turns out to want it).
-    if ((assignment.linkedNote || '').trim()) {
+    const openPath = getAssignmentOpenPath(sem, assignment);
+    if (openPath) {
       const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
-      openBtn.addEventListener('click', () => openVaultNote(this.app, assignment.linkedNote));
+      openBtn.addEventListener('click', () => openVaultNote(this.app, openPath));
 
       if (assignment.type === 'Reading') {
         const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
         setIcon(horusBtn, HORUS_ICON_ID);
-        horusBtn.addEventListener('click', () => openInHorus(this.app, assignment.linkedNote));
+        horusBtn.addEventListener('click', () => openInHorus(this.app, openPath));
       }
     }
 
@@ -8806,6 +8824,7 @@ Object.assign(module.exports, {
   ConfirmReloadModal,
   getGlobalAssignments,
   getAllDeadlineItems,
+  getAssignmentOpenPath,
   getLecturesDisplayed,
   getLectureAssignmentSections,
   HoldCourseView,
