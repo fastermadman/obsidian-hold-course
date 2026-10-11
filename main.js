@@ -3589,6 +3589,12 @@ class HoldCourseView extends ItemView {
         evt.stopPropagation();
         openVaultNote(this.app, lec.vaultLink);
       });
+      const horusBtn = right.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, lec.vaultLink);
+      });
     }
 
     // #9: broken out by Reading vs. everything else — "2 assignments" was
@@ -3697,13 +3703,17 @@ class HoldCourseView extends ItemView {
 
     // Quick-open button for the linked note — same icon-button pattern as
     // the lecture ROW's one-click open, so it's available up here too
-    // instead of only down in the Lecture Notes section below. No Horus
-    // button here: Horus is for opening books (Readings), and a lecture's
-    // linked note isn't one. #22.
+    // instead of only down in the Lecture Notes section below. Horus sits
+    // next to it here too: #22 first kept Horus to books, widened to every
+    // linked note on FasterMadman's call (2026-10-11).
     if ((lec.vaultLink || '').trim()) {
       const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', () => openVaultNote(this.app, lec.vaultLink));
+
+      const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', () => openInHorus(this.app, lec.vaultLink));
     }
 
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
@@ -3893,8 +3903,7 @@ class HoldCourseView extends ItemView {
       // #22 — quick-open pair, its own flex row (not inside aInfo, which
       // stacks its children as block text) so the two buttons sit side by
       // side instead of on top of each other, next to the due-date column.
-      // Horus only for Readings (the assignment type that's actually a
-      // book) — see _renderReadingRow for the same rule.
+      // Horus for every linked note, not just Readings (widened from #22).
       const openPath = getAssignmentOpenPath(this._getViewedSemester(), a);
       if (openPath) {
         const iconActions = aRow.createDiv('hc-row-icon-actions');
@@ -3905,14 +3914,12 @@ class HoldCourseView extends ItemView {
           openVaultNote(this.app, openPath);
         });
 
-        if (a.type === 'Reading') {
-          const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
-          setIcon(horusBtn, HORUS_ICON_ID);
-          horusBtn.addEventListener('click', (evt) => {
-            evt.stopPropagation();
-            openInHorus(this.app, openPath);
-          });
-        }
+        const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+        setIcon(horusBtn, HORUS_ICON_ID);
+        horusBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          openInHorus(this.app, openPath);
+        });
       }
 
       if (a.dueDate) {
@@ -4079,6 +4086,12 @@ class HoldCourseView extends ItemView {
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
         openVaultNote(this.app, assignment.linkedNote);
+      });
+      const horusBtn = mid.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, assignment.linkedNote);
       });
     }
 
@@ -4367,21 +4380,17 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
-    // Quick-open button for the linked note (#22). Horus is only offered on
-    // Readings — that's the assignment type that's actually a book, so it's
-    // the one Horus (a book reader) makes sense for; to start with, at
-    // least (easy to widen to Writing too if that turns out to want it).
+    // Quick-open + Horus buttons for the linked note (#22), on every
+    // assignment type — widened from Readings-only on FasterMadman's call.
     const openPath = getAssignmentOpenPath(sem, assignment);
     if (openPath) {
       const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', () => openVaultNote(this.app, openPath));
 
-      if (assignment.type === 'Reading') {
-        const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
-        setIcon(horusBtn, HORUS_ICON_ID);
-        horusBtn.addEventListener('click', () => openInHorus(this.app, openPath));
-      }
+      const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', () => openInHorus(this.app, openPath));
     }
 
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
