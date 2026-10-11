@@ -1474,10 +1474,16 @@ class HoldCoursePlugin extends Plugin {
     const views = this.app.workspace.getLeavesOfType(VIEW_TYPE)
       .map(leaf => leaf.view)
       .filter(view => view instanceof HoldCourseView);
-    const pending = views.map(view => view._captureDirtyNote());
+    const fresh = await this.loadData() || { currentSemesterId: null, semesters: [] };
+    delete fresh.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
+    // The sync script and Syncthing rewrite data.json often, usually with
+    // nothing changed. Repainting on every write made the open screen jump
+    // back to the top for no visible reason — it read as Obsidian
+    // "restarting". Only repaint when the content actually differs.
+    if (JSON.stringify(fresh) === JSON.stringify(this.data)) return;
 
-    this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
-    delete this.data.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
+    const pending = views.map(view => view._captureDirtyNote());
+    this.data = fresh;
     this.refreshTodayView();
     this.refreshMainView();
 
@@ -2423,7 +2429,15 @@ class HoldCourseView extends ItemView {
     this.render();
   }
 
-  refresh() { this.render(); }
+  // Repaint in place, keeping the scroll position — an external data
+  // change shouldn't throw the reader back to the top of a long list.
+  refresh() {
+    const scrollEl = this._getScrollEl();
+    const top = scrollEl ? scrollEl.scrollTop : 0;
+    this.render();
+    const after = this._getScrollEl();
+    if (after && top) after.scrollTop = Math.min(top, after.scrollHeight);
+  }
 
   // ─── Unsaved-notes protection (#73) ──────────────────────────────────────
   //
