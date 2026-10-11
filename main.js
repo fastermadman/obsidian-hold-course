@@ -2228,11 +2228,15 @@ class HoldCourseView extends ItemView {
       // should keep meaning "you came from Courses" even if that stops
       // being true.
       this.enteredViaCourses = !!semesterId;
+      // #72: the Library tab opens scoped to the class you're in ("All
+      // classes" stays one click away in its filter). Set on every class
+      // change, not just on the class screen, so arriving via a detail
+      // screen (Today, Calendar) can't leave another class's filter behind.
+      this.libraryFilterClassId = classId || null;
     }
-    // Reset tab and library filter when moving to a different class
+    // Reset tab and type filter when moving to a different class
     if (screen === 'class' && classId !== this.currentClassId) {
       this.currentTab = 'Lectures';
-      this.libraryFilterClassId = null;
       this.classAssignFilterType = null;
     }
 
@@ -2366,6 +2370,9 @@ class HoldCourseView extends ItemView {
   // Obsidian's forwardHistory, wipe the very forward branch a back press
   // exists to move back along.
   _restore(snap) {
+    // #72: same class-change rule as navigate() — back/forward or a restart
+    // into another class must not keep the previous class's Library filter.
+    if (snap.classId !== this.currentClassId) this.libraryFilterClassId = snap.classId || null;
     this.screen = snap.screen;
     this.currentClassId = snap.classId;
     this.currentLectureId = snap.lectureId;

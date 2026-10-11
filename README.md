@@ -228,11 +228,11 @@ Exams appear on the Calendar in their own color, distinct from lectures and assi
 
 ## Library
 
-The **Library** tab collects every resource associated with a class — books, articles, reference works — into a single list. Resources accumulate here as you add them, and each one tracks which lectures and assignments reference it.
+The **Library** tab collects every resource associated with the class you're in — books, articles, reference works — into a single list. Resources accumulate here as you add them, and each one tracks which lectures and assignments reference it.
 
 **Adding a resource:** Click **+ Add Resource** to add a resource directly to the Library. Resource types include Book, PDF, Handout, Article, Online resource, and Other.
 
-**Filter by class:** The Library has an *All classes* filter, so you can view resources from a single class or across all your classes at once.
+**Filter by class:** The Library opens filtered to the current class. Switch the filter to another class, or to *All classes* to see every resource in the semester at once.
 
 **Status:** Each resource has a status pill — **Unread**, **In Progress**, or **Done** — that you can advance as you read.
 
