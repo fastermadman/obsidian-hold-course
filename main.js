@@ -504,9 +504,21 @@ function getAllAssignments(semester) {
 // Lectures are excluded on purpose: a lecture is a scheduled event, not a
 // deadline; the calendar owns events. `kind` routes each row's click to the
 // right detail screen.
+//
+// #71: completed and dropped classes are skipped, the same rule
+// getItemsForDate applies to every other date-driven surface — a class the
+// user has finished or dropped stops producing deadlines everywhere at once.
 function getAllDeadlineItems(semester) {
-  const all = getAllAssignments(semester).map(a => ({ ...a, kind: 'assignment' }));
+  const inactive = new Set(
+    (semester.classes || [])
+      .filter(c => c.status === 'completed' || c.status === 'dropped')
+      .map(c => c.id)
+  );
+  const all = getAllAssignments(semester)
+    .filter(a => !inactive.has(a.classId))
+    .map(a => ({ ...a, kind: 'assignment' }));
   for (const cls of (semester.classes || [])) {
+    if (inactive.has(cls.id)) continue;
     for (const e of (cls.exams || [])) {
       all.push({
         ...e, kind: 'exam',
@@ -563,6 +575,19 @@ async function openVaultNote(app, path) {
 // the view type and the tab renders empty; there's no clean way to detect
 // that upfront without importing Horus's code, so this stays a no-frills
 // best-effort call rather than adding a "is Horus installed" check. #22.
+// The file a row's open/Horus buttons point at. An assignment's own Linked
+// Note wins; a Reading without one falls back to its linked Library book's
+// vault file. Without the fallback only readings that arrived with a
+// linkedNote already set (viastudywiz sync) got the buttons — a reading made
+// by hand and linked to a book via "Linked book" never did.
+function getAssignmentOpenPath(sem, a) {
+  const own = (a.linkedNote || '').trim();
+  if (own) return own;
+  if (a.type !== 'Reading' || !a.linkedBook) return '';
+  const res = ((sem && sem.resources) || []).find(r => r.id === a.linkedBook);
+  return ((res && res.vaultLink) || '').trim();
+}
+
 async function openInHorus(app, path) {
   const file = await resolveVaultFile(app, path);
   if (!file) return;
@@ -591,6 +616,30 @@ function getLecturesSorted(cls) {
     if (!b.date) return -1;
     return a.date.localeCompare(b.date);
   });
+}
+
+// #69 — the class Lectures tab's rows, in on-screen order: sort direction
+// first, then the hide-done toggle. Shared by _renderLectureList and
+// _originSequence so prev/next can't drift from what the list shows.
+function getLecturesDisplayed(cls) {
+  const sorted = getLecturesSorted(cls);
+  const ordered = cls.lectureSort === 'desc' ? sorted.reverse() : sorted;
+  const showDone = cls.lectureShowDone !== false;
+  return ordered.filter(lec => showDone || lec.status !== 'done');
+}
+
+// #70 — the lecture detail screen's two sections, Readings and Assignments,
+// each after its own hide-done flag (the class tabs' flags, see
+// _renderLectureDetail). Shared with _originSequence, which walks Readings
+// then Assignments — the same top-to-bottom order the screen shows.
+function getLectureAssignmentSections(cls, lec) {
+  const all = lec.assignments || [];
+  const readingsShowDone = cls.readingsShowDone !== false;
+  const assignShowDone = cls.assignShowDone !== false;
+  return {
+    readings: all.filter(a => a.type === 'Reading' && (readingsShowDone || a.status !== 'done')),
+    assignments: all.filter(a => a.type !== 'Reading' && (assignShowDone || a.status !== 'done')),
+  };
 }
 
 // ─── Bulk lecture paste parsing ───────────────────────────────────────────────
@@ -1425,10 +1474,16 @@ class HoldCoursePlugin extends Plugin {
     const views = this.app.workspace.getLeavesOfType(VIEW_TYPE)
       .map(leaf => leaf.view)
       .filter(view => view instanceof HoldCourseView);
-    const pending = views.map(view => view._captureDirtyNote());
+    const fresh = await this.loadData() || { currentSemesterId: null, semesters: [] };
+    delete fresh.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
+    // The sync script and Syncthing rewrite data.json often, usually with
+    // nothing changed. Repainting on every write made the open screen jump
+    // back to the top for no visible reason — it read as Obsidian
+    // "restarting". Only repaint when the content actually differs.
+    if (JSON.stringify(fresh) === JSON.stringify(this.data)) return;
 
-    this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
-    delete this.data.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
+    const pending = views.map(view => view._captureDirtyNote());
+    this.data = fresh;
     this.refreshTodayView();
     this.refreshMainView();
 
@@ -2192,11 +2247,15 @@ class HoldCourseView extends ItemView {
       // should keep meaning "you came from Courses" even if that stops
       // being true.
       this.enteredViaCourses = !!semesterId;
+      // #72: the Library tab opens scoped to the class you're in ("All
+      // classes" stays one click away in its filter). Set on every class
+      // change, not just on the class screen, so arriving via a detail
+      // screen (Today, Calendar) can't leave another class's filter behind.
+      this.libraryFilterClassId = classId || null;
     }
-    // Reset tab and library filter when moving to a different class
+    // Reset tab and type filter when moving to a different class
     if (screen === 'class' && classId !== this.currentClassId) {
       this.currentTab = 'Lectures';
-      this.libraryFilterClassId = null;
       this.classAssignFilterType = null;
     }
 
@@ -2330,6 +2389,9 @@ class HoldCourseView extends ItemView {
   // Obsidian's forwardHistory, wipe the very forward branch a back press
   // exists to move back along.
   _restore(snap) {
+    // #72: same class-change rule as navigate() — back/forward or a restart
+    // into another class must not keep the previous class's Library filter.
+    if (snap.classId !== this.currentClassId) this.libraryFilterClassId = snap.classId || null;
     this.screen = snap.screen;
     this.currentClassId = snap.classId;
     this.currentLectureId = snap.lectureId;
@@ -2367,7 +2429,15 @@ class HoldCourseView extends ItemView {
     this.render();
   }
 
-  refresh() { this.render(); }
+  // Repaint in place, keeping the scroll position — an external data
+  // change shouldn't throw the reader back to the top of a long list.
+  refresh() {
+    const scrollEl = this._getScrollEl();
+    const top = scrollEl ? scrollEl.scrollTop : 0;
+    this.render();
+    const after = this._getScrollEl();
+    if (after && top) after.scrollTop = Math.min(top, after.scrollHeight);
+  }
 
   // ─── Unsaved-notes protection (#73) ──────────────────────────────────────
   //
@@ -2793,13 +2863,9 @@ class HoldCourseView extends ItemView {
       // (readingsShowDone/assignShowDone, added alongside this fix) — same
       // reasoning as the class-tab branch below: a "next" click must not
       // land on a row the screen you were looking at had actually hidden.
-      const readingsShowDone = cls.readingsShowDone !== false;
-      const assignShowDone = cls.assignShowDone !== false;
-      const items = (lec.assignments || [])
-        .filter(a => {
-          const showDone = a.type === 'Reading' ? readingsShowDone : assignShowDone;
-          return showDone || a.status !== 'done';
-        })
+      // #70: Readings section first, then Assignments, as rendered.
+      const { readings, assignments } = getLectureAssignmentSections(cls, lec);
+      const items = [...readings, ...assignments]
         .map(a => ({ screen: 'assignment', classId: cls.id, lectureId: lec.id, assignmentId: a.id }));
       const index = items.findIndex(it => it.assignmentId === this.currentAssignmentId);
       return index === -1 ? null : { items, index };
@@ -2813,10 +2879,8 @@ class HoldCourseView extends ItemView {
         // Mirrors _renderLectureList's own cls.lectureShowDone filter — same
         // "found on-device" gap as the two branches above: this one already
         // had a working toggle, it just wasn't being read here.
-        const showDone = cls.lectureShowDone !== false;
-        let sorted = getLecturesSorted(cls);
-        if (!showDone) sorted = sorted.filter(l => l.status !== 'done');
-        const items = sorted.map(l => ({ screen: 'lecture', classId: cls.id, lectureId: l.id }));
+        // #69: and its cls.lectureSort direction, via the same helper.
+        const items = getLecturesDisplayed(cls).map(l => ({ screen: 'lecture', classId: cls.id, lectureId: l.id }));
         const index = items.findIndex(it => it.lectureId === this.currentLectureId);
         return index === -1 ? null : { items, index };
       }
@@ -3440,9 +3504,8 @@ class HoldCourseView extends ItemView {
     if (cls.lectureShowDone === undefined) cls.lectureShowDone = true;
     const showDone = cls.lectureShowDone;
     const sortDesc = cls.lectureSort === 'desc';
-    const sorted = getLecturesSorted(cls);
-    const displayed = (sortDesc ? [...sorted].reverse() : sorted)
-      .filter(lec => showDone || lec.status !== 'done');
+    const sorted = getLecturesSorted(cls); // chronological numbering below
+    const displayed = getLecturesDisplayed(cls);
 
     const controlRow = content.createDiv('hc-lecture-controls');
 
@@ -3539,6 +3602,12 @@ class HoldCourseView extends ItemView {
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
         openVaultNote(this.app, lec.vaultLink);
+      });
+      const horusBtn = right.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, lec.vaultLink);
       });
     }
 
@@ -3648,13 +3717,17 @@ class HoldCourseView extends ItemView {
 
     // Quick-open button for the linked note — same icon-button pattern as
     // the lecture ROW's one-click open, so it's available up here too
-    // instead of only down in the Lecture Notes section below. No Horus
-    // button here: Horus is for opening books (Readings), and a lecture's
-    // linked note isn't one. #22.
+    // instead of only down in the Lecture Notes section below. Horus sits
+    // next to it here too: #22 first kept Horus to books, widened to every
+    // linked note on FasterMadman's call (2026-10-11).
     if ((lec.vaultLink || '').trim()) {
       const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', () => openVaultNote(this.app, lec.vaultLink));
+
+      const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', () => openInHorus(this.app, lec.vaultLink));
     }
 
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
@@ -3745,7 +3818,6 @@ class HoldCourseView extends ItemView {
     // before; only the grouping and labels changed. Both show an explicit
     // empty state rather than disappearing, so the structure is visible
     // even before anything's been added. (LiveAQuietLife, 2026-09-01)
-    const lecAssignments = lec.assignments || [];
 
     // Hide-done reuses the SAME flags as the class's Readings/Assignments
     // tabs (cls.readingsShowDone/cls.assignShowDone) rather than a new,
@@ -3769,9 +3841,8 @@ class HoldCourseView extends ItemView {
       this.plugin.save();
       this.render();
     });
+    const { readings, assignments } = getLectureAssignmentSections(cls, lec);
     const readingList = content.createDiv('hc-lecture-assign-list');
-    let readings = lecAssignments.filter(a => a.type === 'Reading');
-    if (!readingsShowDone) readings = readings.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       readingList,
       readings,
@@ -3791,8 +3862,6 @@ class HoldCourseView extends ItemView {
       this.render();
     });
     const assignList = content.createDiv('hc-lecture-assign-list');
-    let assignments = lecAssignments.filter(a => a.type !== 'Reading');
-    if (!assignShowDone) assignments = assignments.filter(a => a.status !== 'done');
     this._renderLectureAssignRows(
       assignList,
       assignments,
@@ -3848,25 +3917,23 @@ class HoldCourseView extends ItemView {
       // #22 — quick-open pair, its own flex row (not inside aInfo, which
       // stacks its children as block text) so the two buttons sit side by
       // side instead of on top of each other, next to the due-date column.
-      // Horus only for Readings (the assignment type that's actually a
-      // book) — see _renderReadingRow for the same rule.
-      if ((a.linkedNote || '').trim()) {
+      // Horus for every linked note, not just Readings (widened from #22).
+      const openPath = getAssignmentOpenPath(this._getViewedSemester(), a);
+      if (openPath) {
         const iconActions = aRow.createDiv('hc-row-icon-actions');
         const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
         setIcon(openBtn, 'external-link');
         openBtn.addEventListener('click', (evt) => {
           evt.stopPropagation();
-          openVaultNote(this.app, a.linkedNote);
+          openVaultNote(this.app, openPath);
         });
 
-        if (a.type === 'Reading') {
-          const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
-          setIcon(horusBtn, HORUS_ICON_ID);
-          horusBtn.addEventListener('click', (evt) => {
-            evt.stopPropagation();
-            openInHorus(this.app, a.linkedNote);
-          });
-        }
+        const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+        setIcon(horusBtn, HORUS_ICON_ID);
+        horusBtn.addEventListener('click', (evt) => {
+          evt.stopPropagation();
+          openInHorus(this.app, openPath);
+        });
       }
 
       if (a.dueDate) {
@@ -4034,6 +4101,12 @@ class HoldCourseView extends ItemView {
         evt.stopPropagation();
         openVaultNote(this.app, assignment.linkedNote);
       });
+      const horusBtn = mid.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, assignment.linkedNote);
+      });
     }
 
     // Right: status (matches the lecture/exam position), then due date
@@ -4176,22 +4249,25 @@ class HoldCourseView extends ItemView {
     // inside `mid`, which stacks its children as block text) so they sit
     // side by side next to the due-date column instead of on top of each
     // other. Every Reading here is a book, so Horus always applies.
-    if ((assignment.linkedNote || '').trim()) {
-      mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
+    const openPath = getAssignmentOpenPath(sem, assignment);
+    if (openPath) {
+      if ((assignment.linkedNote || '').trim()) {
+        mid.createDiv({ cls: 'hc-lecture-note-flag', text: 'Linked note' });
+      }
 
       const iconActions = row.createDiv('hc-row-icon-actions');
       const openBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
-        openVaultNote(this.app, assignment.linkedNote);
+        openVaultNote(this.app, openPath);
       });
 
       const horusBtn = iconActions.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
       setIcon(horusBtn, HORUS_ICON_ID);
       horusBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
-        openInHorus(this.app, assignment.linkedNote);
+        openInHorus(this.app, openPath);
       });
     }
 
@@ -4318,20 +4394,17 @@ class HoldCourseView extends ItemView {
       }).open();
     });
 
-    // Quick-open button for the linked note (#22). Horus is only offered on
-    // Readings — that's the assignment type that's actually a book, so it's
-    // the one Horus (a book reader) makes sense for; to start with, at
-    // least (easy to widen to Writing too if that turns out to want it).
-    if ((assignment.linkedNote || '').trim()) {
+    // Quick-open + Horus buttons for the linked note (#22), on every
+    // assignment type — widened from Readings-only on FasterMadman's call.
+    const openPath = getAssignmentOpenPath(sem, assignment);
+    if (openPath) {
       const openBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn', attr: { 'aria-label': 'Open linked note' } });
       setIcon(openBtn, 'external-link');
-      openBtn.addEventListener('click', () => openVaultNote(this.app, assignment.linkedNote));
+      openBtn.addEventListener('click', () => openVaultNote(this.app, openPath));
 
-      if (assignment.type === 'Reading') {
-        const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
-        setIcon(horusBtn, HORUS_ICON_ID);
-        horusBtn.addEventListener('click', () => openInHorus(this.app, assignment.linkedNote));
-      }
+      const horusBtn = actionsRow.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', () => openInHorus(this.app, openPath));
     }
 
     const deleteBtn = actionsRow.createEl('button', { cls: 'hc-btn hc-btn--sm hc-btn--danger' });
@@ -4798,9 +4871,14 @@ class HoldCourseView extends ItemView {
 
     const list = content.createDiv('hc-resource-list');
 
-    if (resources.length === 0) {
+    if ((sem.resources || []).length === 0) {
       const empty = list.createDiv('hc-empty');
       empty.createDiv({ cls: 'hc-empty-text', text: 'No resources yet. Add your first one above.' });
+    } else if (resources.length === 0) {
+      // #72: resources exist, the class filter hid them all.
+      const empty = list.createDiv('hc-empty');
+      const filterCls = (sem.classes || []).find(c => c.id === this.libraryFilterClassId);
+      empty.createDiv({ cls: 'hc-empty-text', text: filterCls ? `No ${filterCls.code} resources.` : 'No resources for this class.' });
     } else {
       for (const resource of resources) {
         this._renderLibraryRow(list, resource, sem, cls);
@@ -4825,6 +4903,13 @@ class HoldCourseView extends ItemView {
       openBtn.addEventListener('click', (evt) => {
         evt.stopPropagation();
         openVaultNote(this.app, resource.vaultLink);
+      });
+
+      const horusBtn = right.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, resource.vaultLink);
       });
     }
 
@@ -5163,15 +5248,19 @@ class HoldCourseView extends ItemView {
       ta.addEventListener('blur', async () => {
         armSwallow();
         await this._writeNoteBody(file, ta.value);
-        render();
+        if (wrap.isConnected) render();
       });
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
     };
 
+    // #74: every await below can outlive this widget — a view re-render
+    // empties contentEl and detaches `wrap`. Painting into a detached node
+    // is invisible, so bail instead; the re-render built its own widget.
     const render = async () => {
       wrap.empty();
       const file = await this._resolveNoteFile(item.notesLink || '');
+      if (!wrap.isConnected) return;
 
       // No file yet: click the placeholder to create the stub and drop into it.
       if (!file) {
@@ -5183,13 +5272,14 @@ class HoldCourseView extends ItemView {
         preview.addEventListener('click', async () => {
           if (swallowNextClick) { swallowNextClick = false; return; }
           await this._createNoteStub(item, spec);
-          render();
+          if (wrap.isConnected) render();
         });
         return;
       }
 
       let raw = '';
       try { raw = await this.app.vault.read(file); } catch (e) { raw = ''; }
+      if (!wrap.isConnected) return;
       const body = splitFrontmatter(raw).body.trim();
       const owned = this._ownsNoteFile(file, item, spec.idKey);
 
@@ -5239,13 +5329,18 @@ class HoldCourseView extends ItemView {
     return file;
   }
 
-  // ponytail: notesLink-path match is the session-1 truth (we're the only
-  // writer of that field). The frontmatter id check (idKey) is the
-  // rename/move-proof path for re-matching a file the user moved.
+  // #67: the frontmatter id is the primary check — it's what the stub was
+  // stamped with, and it survives renames/moves. The notesLink-path match is
+  // only the fallback for a file whose frontmatter isn't indexed yet (or has
+  // no id at all). Path-first let two records share one file: moveClass's
+  // resource copy carries the original's notesLink, and would otherwise be
+  // allowed to overwrite the original's notes. Now the copy sees the shared
+  // note read-only, like any other file Hold Course didn't create for it.
   _ownsNoteFile(file, item, idKey = 'hc_resource_id') {
-    if (item.notesLink && file && item.notesLink === file.path) return true;
+    if (!file) return false;
     const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-    return !!fm && fm[idKey] === item.id;
+    if (fm && fm[idKey]) return fm[idKey] === item.id;
+    return !!item.notesLink && item.notesLink === file.path;
   }
 
   // #5b Del A read path: when the resource screen opens, pull hc_* values from
@@ -8759,6 +8854,9 @@ Object.assign(module.exports, {
   ConfirmReloadModal,
   getGlobalAssignments,
   getAllDeadlineItems,
+  getAssignmentOpenPath,
+  getLecturesDisplayed,
+  getLectureAssignmentSections,
   HoldCourseView,
   normalizeSettings,
   splitFrontmatter,

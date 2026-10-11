@@ -133,3 +133,21 @@ test('_resolveNoteTarget: returns null for a file-backed lecture note (nothing t
   view.currentLectureId = 'l1';
   assert.equal(view._resolveNoteTarget(), null);
 });
+
+// An unchanged data.json rewrite (sync script, Syncthing) must not repaint.
+test('external write with identical content does not repaint', async () => {
+  const HoldCoursePlugin = require('./_bootstrap.js');
+  const plugin = Object.create(HoldCoursePlugin.prototype);
+  plugin.data = { currentSemesterId: 's1', semesters: [{ id: 's1', classes: [] }] };
+  plugin.loadData = async () => JSON.parse(JSON.stringify(plugin.data));
+  let repaints = 0;
+  plugin.app = { workspace: { getLeavesOfType: () => [] } };
+  plugin.refreshTodayView = () => { repaints++; };
+  plugin.refreshMainView = () => { repaints++; };
+  await plugin.onExternalSettingsChange();
+  assert.equal(repaints, 0);
+  plugin.loadData = async () => ({ currentSemesterId: 's2', semesters: [] });
+  await plugin.onExternalSettingsChange();
+  assert.equal(repaints, 2);
+  assert.equal(plugin.data.currentSemesterId, 's2');
+});

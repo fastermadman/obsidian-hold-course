@@ -244,3 +244,26 @@ test('setState() on a layout saved before #35 leaves the default screen alone', 
   view.setState({}, { history: true, layout: true, close: false });
   assert.equal(view.screen, 'dashboard');
 });
+
+// #72 — the Library tab opens scoped to the class you're in.
+test('entering a class scopes the Library filter to it', () => {
+  const view = Object.create(HoldCourseView.prototype);
+  view.render = () => {};
+  view.libraryFilterClassId = null;
+  view.navigate('class', 'c1');
+  assert.equal(view.libraryFilterClassId, 'c1');
+  view.libraryFilterClassId = null; // user picks "All classes"
+  view.navigate('class', 'c1');     // same class: choice survives
+  assert.equal(view.libraryFilterClassId, null);
+  view.navigate('lecture', 'c2', 'l1'); // another class via a detail screen
+  assert.equal(view.libraryFilterClassId, 'c2');
+});
+
+test('restoring into another class re-scopes the Library filter', () => {
+  const view = Object.create(HoldCourseView.prototype);
+  view.render = () => {};
+  view.currentClassId = 'c1';
+  view.libraryFilterClassId = 'c1';
+  view._restore({ screen: 'class', classId: 'c2', tab: 'Library' });
+  assert.equal(view.libraryFilterClassId, 'c2');
+});

@@ -168,3 +168,30 @@ test('buildNoteStub: an existing lecture note is migrated into the file body', (
   assert.match(body, /Kilde: \[\[FAG\/Musik\/Uge 37\/\[NOTE\] Lektion\]\]/);
   assert.match(body, /my prep notes/);
 });
+
+// #67 — the frontmatter id decides ownership; the path is only a fallback.
+{
+  const { HoldCourseView } = require('./_bootstrap.js');
+  const ownerView = (fm) => {
+    const view = Object.create(HoldCourseView.prototype);
+    view.app = { metadataCache: { getFileCache: () => (fm ? { frontmatter: fm } : null) } };
+    return view;
+  };
+  const file = { path: 'Hold Course/Readings/Kant.md' };
+
+  test('moveClass copy sharing a note path does not own it', () => {
+    const copy = { id: 'copy', notesLink: file.path };
+    assert.equal(ownerView({ hc_resource_id: 'orig' })._ownsNoteFile(file, copy), false);
+  });
+
+  test('original record still owns its stub', () => {
+    const orig = { id: 'orig', notesLink: file.path };
+    assert.equal(ownerView({ hc_resource_id: 'orig' })._ownsNoteFile(file, orig), true);
+  });
+
+  test('path match is the fallback while frontmatter is not indexed yet', () => {
+    const orig = { id: 'orig', notesLink: file.path };
+    assert.equal(ownerView(null)._ownsNoteFile(file, orig), true);
+    assert.equal(ownerView(null)._ownsNoteFile(file, { id: 'x', notesLink: 'other.md' }), false);
+  });
+}
