@@ -4890,6 +4890,13 @@ class HoldCourseView extends ItemView {
         evt.stopPropagation();
         openVaultNote(this.app, resource.vaultLink);
       });
+
+      const horusBtn = right.createEl('button', { cls: 'hc-resource-open-btn hc-resource-open-btn--horus', attr: { 'aria-label': 'Open in Horus' } });
+      setIcon(horusBtn, HORUS_ICON_ID);
+      horusBtn.addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        openInHorus(this.app, resource.vaultLink);
+      });
     }
 
     if (resource.classIds && resource.classIds.length > 0) {
