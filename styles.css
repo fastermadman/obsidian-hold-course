@@ -636,11 +636,16 @@
 
 /* --- Tabs ------------------------------------------------------------------ */
 
+/* #85 (from upstream 1.9.1): overflow-x forces overflow-y to auto, which
+   drops the row's min-height to 0. In a mobile modal .modal-content is a
+   column flex container, so flex-shrink crushed the Add/Edit class tabs to
+   just their border. flex-shrink: 0 is inert outside flex containers. */
 .hc-tab-row {
   display: flex;
   border-bottom: 1px solid var(--background-modifier-border);
   margin-bottom: 24px;
   overflow-x: auto;
+  flex-shrink: 0;
 }
 
 .hc-tab {
@@ -3027,11 +3032,20 @@ body.hc-eink .hc-resource-source-icon {
   color: var(--text-normal);
 }
 
+/* #85 (from upstream 1.9.3): same flex-shrink trap as .hc-tab-row. With the
+   keyboard open the preview collapsed to two bare lines; now the modal
+   scrolls instead. */
 .hc-bulk-preview {
   border: 1px solid var(--background-modifier-border);
   border-radius: 6px;
   max-height: 220px;
   overflow-y: auto;
+  flex-shrink: 0;
+}
+
+/* The mobile modal squeezed the paste box to about a line and a half. */
+body.is-mobile .hc-bulk-textarea {
+  min-height: 9em;
 }
 
 .hc-bulk-preview:empty { display: none; }
