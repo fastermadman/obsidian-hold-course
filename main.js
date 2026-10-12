@@ -1417,6 +1417,16 @@ class HoldCoursePlugin extends Plugin {
       }
     }));
 
+    // #85 (from upstream 1.9.2): onExternalSettingsChange doesn't fire on
+    // the receiving device when a sync tool writes data.json (seen on
+    // Android), so check on resume and once a minute too.
+    const check = () => this._reloadIfChanged();
+    this.registerDomEvent(window, 'focus', check);
+    this.registerDomEvent(document, 'visibilitychange', () => {
+      if (document.visibilityState === 'visible') check();
+    });
+    this.registerInterval(window.setInterval(check, 60 * 1000));
+
     this.registerView(VIEW_TYPE, (leaf) => new HoldCourseView(leaf, this));
     this.registerView(TODAY_VIEW_TYPE, (leaf) => new HoldCourseTodayView(leaf, this));
     // Registered here too (not just by Horus itself) so the "Open in Horus"
@@ -1574,6 +1584,28 @@ class HoldCoursePlugin extends Plugin {
     // "restarting". Only repaint when the content actually differs.
     if (JSON.stringify(fresh) === JSON.stringify(this.data)) return;
     this._replaceData(fresh);
+  }
+
+  // One stat() per call; only a changed mtime/size reads the file, and
+  // onExternalSettingsChange's content guard turns our own saves into no-ops.
+  // Compares "different", not "newer": Syncthing keeps the source's mtime.
+  // While a modal or a form field is open, a swap would leave it editing
+  // stale objects, so the stamp isn't recorded and the next trigger retries.
+  async _reloadIfChanged() {
+    if (this._reloading) return; // focus + visibilitychange fire together on Android resume
+    this._reloading = true;
+    try {
+      const st = await this.app.vault.adapter.stat(`${this.manifest.dir}/data.json`).catch(() => null);
+      const stamp = st && `${st.mtime}:${st.size}`;
+      if (!stamp || stamp === this._diskStamp) return;
+      if (document.querySelector('.modal-container')) return;
+      const a = document.activeElement;
+      if (a && a.matches && a.matches('input, textarea, select') && a.closest('.hc-root, .hc-today-root')) return;
+      this._diskStamp = stamp;
+      await this.onExternalSettingsChange();
+    } finally {
+      this._reloading = false;
+    }
   }
 
   // #73: capture any focused-but-unsaved notes field BEFORE the swap below
