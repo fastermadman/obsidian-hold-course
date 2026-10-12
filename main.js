@@ -300,6 +300,86 @@ function compareSemestersByTimeline(a, b, dir = 1) {
 // Canonical contract: ValdiVault/10_Projects/VIAstudyWiz/14-hold-course-synk.md.
 const CURRENT_DATA_VERSION = 2;
 
+// ─── In-process API for ItsWiz (#84) ─────────────────────────────────────────
+// ItsWiz (viastudywiz-extension) syncs itslearning into this plugin through
+// `plugin.api.update(fn)` instead of rewriting data.json from outside. The
+// sync logic stays in ItsWiz; this side only enforces what an external writer
+// may change. Bump EXTERNAL_API_VERSION when update()'s contract changes, so
+// ItsWiz can refuse an older Hold Course.
+const EXTERNAL_API_VERSION = 1;
+
+// Fields an external writer may change on an object that already existed,
+// keyed by the array the object lives in. `vsw*` keys (the writer's own
+// stamps) are always allowed. Anything else — status pills, grades, notes,
+// contact fields, UI state — is the user's and is restored after the call.
+// Lecture time/location/instructor are itslearning facts per lecture (#41);
+// the writer only overwrites them while they still match its own vsw* stamp.
+const EXTERNAL_WRITABLE = {
+  semesters: ['classes', 'resources'],
+  classes: ['code', 'courseUrl', 'lectures', 'assignments', 'resources'],
+  lectures: ['title', 'date', 'description', 'vaultLink', 'meetingStartTime', 'meetingEndTime', 'location', 'professorName', 'assignments'],
+  assignments: ['title', 'type', 'dueDate', 'linkedBook'],
+  resources: ['vaultLink', 'classIds'],
+};
+
+function indexById(data) {
+  const byId = new Map();
+  const walk = (obj) => {
+    for (const [kind, value] of Object.entries(obj)) {
+      if (!Array.isArray(value)) continue;
+      for (const item of value) {
+        if (!item || typeof item !== 'object' || !item.id) continue;
+        byId.set(item.id, { item, kind });
+        walk(item);
+      }
+    }
+  };
+  walk(data);
+  return byId;
+}
+
+// Compares `after` (the writer's draft) against `before` by object id and
+// restores every change the writer doesn't own, in place. Returns what was
+// restored. Throws — and so nothing is saved — if the writer removed an object
+// it may not remove: only its own stamped objects, or ones whose note no longer
+// exists (dead links), may go.
+function guardExternalUpdate(before, after, fileExists) {
+  const restored = [];
+  const restore = (obj, key, oldObj, label) => {
+    if (key in oldObj) obj[key] = structuredClone(oldObj[key]);
+    else delete obj[key];
+    restored.push(label);
+  };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (key === 'semesters' || same(before[key], after[key])) continue;
+    if (key === 'currentSemesterId' && !before.currentSemesterId) continue;
+    restore(after, key, before, key);
+  }
+
+  const afterById = indexById(after);
+  for (const [id, { item: old, kind }] of indexById(before)) {
+    const cur = afterById.get(id)?.item;
+    if (!cur) {
+      const stamped = Object.keys(old).some(k => k.startsWith('vsw'));
+      const link = old.vaultLink || old.linkedNote;
+      if (stamped || (link && !fileExists(link))) continue;
+      throw new Error(`Hold Course API: update() removed ${kind} "${old.title || id}", which it doesn't own`);
+    }
+    const writable = EXTERNAL_WRITABLE[kind] || [];
+    for (const key of new Set([...Object.keys(old), ...Object.keys(cur)])) {
+      if (key.startsWith('vsw') || writable.includes(key) || same(old[key], cur[key])) continue;
+      // Ticked off in the vault: the only status move the writer may make, and never back.
+      if (kind === 'assignments' && key === 'status' && old.status === 'not-started' && cur.status === 'done') continue;
+      // The writer may fill an empty linked note, or NFC-normalise one; a note the user picked stays.
+      if (kind === 'assignments' && key === 'linkedNote' && (!old.linkedNote || old.linkedNote.normalize('NFC') === cur.linkedNote)) continue;
+      restore(cur, key, old, `${kind} ${id}.${key}`);
+    }
+  }
+  return restored;
+}
+
 // A semester is hidden from the switcher when the key is present. Absent = visible,
 // same presence-based pattern as class `status`. Nothing is archived, frozen, or
 // made read-only — this governs one thing: whether the switcher draws it.
@@ -1297,6 +1377,7 @@ class HoldCoursePlugin extends Plugin {
     this.applyTimeFormat();
 
     this.addSettingTab(new HoldCourseSettingTab(this.app, this));
+    this.api = { version: EXTERNAL_API_VERSION, update: (mutate, opts) => this._externalUpdate(mutate, opts) };
 
     // Load-time schema guard (hold-course#63). A data.json stamped higher than
     // this build knows was written by a newer sync_hold_course.py — a field or
@@ -1468,12 +1549,6 @@ class HoldCoursePlugin extends Plugin {
   // building the merge path preemptively. (LiveAQuietLife/Claude,
   // 2026-08-30 — see issue #2)
   async onExternalSettingsChange() {
-    // #73: capture any focused-but-unsaved notes field BEFORE the swap below
-    // orphans the entity its blur handler points at, then reapply it to the
-    // fresh graph after the repaint. See HoldCourseView's unsaved-notes block.
-    const views = this.app.workspace.getLeavesOfType(VIEW_TYPE)
-      .map(leaf => leaf.view)
-      .filter(view => view instanceof HoldCourseView);
     const fresh = await this.loadData() || { currentSemesterId: null, semesters: [] };
     delete fresh.settings; // legacy key if an old-format data.json was synced in; prefs live in device-settings.json now (#10)
     // The sync script and Syncthing rewrite data.json often, usually with
@@ -1481,13 +1556,50 @@ class HoldCoursePlugin extends Plugin {
     // back to the top for no visible reason — it read as Obsidian
     // "restarting". Only repaint when the content actually differs.
     if (JSON.stringify(fresh) === JSON.stringify(this.data)) return;
+    this._replaceData(fresh);
+  }
 
+  // #73: capture any focused-but-unsaved notes field BEFORE the swap below
+  // orphans the entity its blur handler points at, then reapply it to the
+  // fresh graph after the repaint. See HoldCourseView's unsaved-notes block.
+  _replaceData(fresh) {
+    const views = this.app.workspace.getLeavesOfType(VIEW_TYPE)
+      .map(leaf => leaf.view)
+      .filter(view => view instanceof HoldCourseView);
     const pending = views.map(view => view._captureDirtyNote());
     this.data = fresh;
     this.refreshTodayView();
     this.refreshMainView();
 
     views.forEach((view, i) => { if (pending[i]) view._restoreDirtyNote(pending[i]); });
+  }
+
+  // #84: `mutate` gets a copy of the content and must be synchronous. From the
+  // clone to the swap there is no await, so an edit the user makes while
+  // ItsWiz works can't land in between and be overwritten. One save and one
+  // repaint per call, and only when something changed.
+  // `{ userEdits: true }` skips the guard: it is for replaying edits the user
+  // made in Hold Course on another device (ItsWiz' Boox merge), which are the
+  // user's own and so may touch status, grades and notes.
+  async _externalUpdate(mutate, { userEdits = false } = {}) {
+    const links = new Set();
+    for (const { item } of indexById(this.data).values()) {
+      if (item.vaultLink) links.add(item.vaultLink);
+      if (item.linkedNote) links.add(item.linkedNote);
+    }
+    const exists = new Map(await Promise.all(
+      [...links].map(async p => [p, await this.app.vault.adapter.exists(p)])));
+
+    const draft = structuredClone(this.data);
+    const result = mutate(draft);
+    if (result instanceof Promise) throw new Error('Hold Course API: update() takes a synchronous function');
+    const restored = userEdits ? [] : guardExternalUpdate(this.data, draft, p => exists.get(p) ?? true);
+    if (restored.length) console.warn('Hold Course API: restored fields the writer does not own:', restored);
+    if (JSON.stringify(draft) !== JSON.stringify(this.data)) {
+      this._replaceData(draft);
+      await this.saveData(this.data);
+    }
+    return { result, restored };
   }
 
   async activateView() {
@@ -8850,6 +8962,8 @@ module.exports = HoldCoursePlugin;
 // can be unit-tested without starting the app. See test/.
 Object.assign(module.exports, {
   CURRENT_DATA_VERSION,
+  EXTERNAL_API_VERSION,
+  guardExternalUpdate,
   openVaultNote,
   ConfirmReloadModal,
   getGlobalAssignments,
