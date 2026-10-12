@@ -1410,6 +1410,13 @@ class HoldCoursePlugin extends Plugin {
     if (inlineSettings) changed = true; // drop the moved-out `settings` key
     if (changed) await this.saveData(this.data);
 
+    this.registerEvent(this.app.vault.on('rename', async (file, oldPath) => {
+      if (remapNotePaths(this.data, oldPath, file && file.path)) {
+        await this.save();
+        this.refreshMainView();
+      }
+    }));
+
     this.registerView(VIEW_TYPE, (leaf) => new HoldCourseView(leaf, this));
     this.registerView(TODAY_VIEW_TYPE, (leaf) => new HoldCourseTodayView(leaf, this));
     // Registered here too (not just by Horus itself) so the "Open in Horus"
@@ -8975,6 +8982,38 @@ EditResourceModal.prototype._renderFooter   = _renderFooter;
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
+// Note links are stored as plain vault paths (vaultLink, linkedNote,
+// notesLink), so nothing followed a note when it moved. Rewrites every stored
+// path equal to oldPath, or inside it when a folder moved, across all
+// semesters. Returns how many changed. Ported from upstream 1.9.2 (#85),
+// widened to notesLink and exams. A synced second device sees the move as
+// delete + create, so it gets the corrected paths through data.json instead.
+function remapNotePaths(data, oldPath, newPath) {
+  if (!oldPath || !newPath || oldPath === newPath) return 0;
+  const prefix = oldPath + '/';
+  let count = 0;
+  const fix = (obj) => {
+    for (const key of ['vaultLink', 'linkedNote', 'notesLink']) {
+      const p = obj[key];
+      if (!p) continue;
+      const next = p === oldPath ? newPath : p.startsWith(prefix) ? newPath + p.slice(oldPath.length) : null;
+      if (next) { obj[key] = next; count++; }
+    }
+  };
+  for (const sem of (data.semesters || [])) {
+    for (const cls of (sem.classes || [])) {
+      for (const a of (cls.assignments || [])) fix(a);
+      for (const e of (cls.exams || [])) fix(e);
+      for (const lec of (cls.lectures || [])) {
+        fix(lec);
+        for (const a of (lec.assignments || [])) fix(a);
+      }
+    }
+    for (const r of (sem.resources || [])) fix(r);
+  }
+  return count;
+}
+
 module.exports = HoldCoursePlugin;
 
 // Obsidian only uses the default export; these are attached so pure logic
@@ -8987,6 +9026,7 @@ Object.assign(module.exports, {
   ConfirmReloadModal,
   getGlobalAssignments,
   getAllDeadlineItems,
+  remapNotePaths,
   getAssignmentOpenPath,
   getLecturesDisplayed,
   getLectureAssignmentSections,
