@@ -117,5 +117,9 @@ test('api.update(): one save, repaint, restore report, sync-only', async () => {
   assert.equal(saves, 1, 'no save when nothing changed');
 
   await assert.rejects(plugin._externalUpdate(async () => {}), /synchronous/);
+
+  const edited = await plugin._externalUpdate((d) => { asg(d, 'asg-read-1').grade = '10'; }, { userEdits: true });
+  assert.deepEqual(edited.restored, []);
+  assert.equal(asg(plugin.data, 'asg-read-1').grade, '10', 'userEdits skips the guard');
   assert.equal(EXTERNAL_API_VERSION, 1);
 });

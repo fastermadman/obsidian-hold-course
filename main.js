@@ -1377,7 +1377,7 @@ class HoldCoursePlugin extends Plugin {
     this.applyTimeFormat();
 
     this.addSettingTab(new HoldCourseSettingTab(this.app, this));
-    this.api = { version: EXTERNAL_API_VERSION, update: (mutate) => this._externalUpdate(mutate) };
+    this.api = { version: EXTERNAL_API_VERSION, update: (mutate, opts) => this._externalUpdate(mutate, opts) };
 
     // Load-time schema guard (hold-course#63). A data.json stamped higher than
     // this build knows was written by a newer sync_hold_course.py — a field or
@@ -1578,7 +1578,10 @@ class HoldCoursePlugin extends Plugin {
   // clone to the swap there is no await, so an edit the user makes while
   // ItsWiz works can't land in between and be overwritten. One save and one
   // repaint per call, and only when something changed.
-  async _externalUpdate(mutate) {
+  // `{ userEdits: true }` skips the guard: it is for replaying edits the user
+  // made in Hold Course on another device (ItsWiz' Boox merge), which are the
+  // user's own and so may touch status, grades and notes.
+  async _externalUpdate(mutate, { userEdits = false } = {}) {
     const links = new Set();
     for (const { item } of indexById(this.data).values()) {
       if (item.vaultLink) links.add(item.vaultLink);
@@ -1590,7 +1593,7 @@ class HoldCoursePlugin extends Plugin {
     const draft = structuredClone(this.data);
     const result = mutate(draft);
     if (result instanceof Promise) throw new Error('Hold Course API: update() takes a synchronous function');
-    const restored = guardExternalUpdate(this.data, draft, p => exists.get(p) ?? true);
+    const restored = userEdits ? [] : guardExternalUpdate(this.data, draft, p => exists.get(p) ?? true);
     if (restored.length) console.warn('Hold Course API: restored fields the writer does not own:', restored);
     if (JSON.stringify(draft) !== JSON.stringify(this.data)) {
       this._replaceData(draft);
