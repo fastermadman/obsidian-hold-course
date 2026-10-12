@@ -564,15 +564,22 @@ function getDueInfo(isoDate) {
   return { label: dateStr, color: einkActive ? EINK_UPCOMING_COLOR : 'var(--text-muted)', note: `${diff} days`, noteColor: 'var(--text-faint)', urgency: 'upcoming' };
 }
 
+// Completed or dropped: the class has stopped surfacing (#71, #85 from
+// upstream 1.9.3). Rows carry `classInactive` so callers can grey them.
+function isClassInactive(cls) {
+  return !!cls && (cls.status === 'completed' || cls.status === 'dropped');
+}
+
 function getAllAssignments(semester) {
   const all = [];
   for (const cls of (semester.classes || [])) {
+    const classInactive = isClassInactive(cls);
     for (const a of (cls.assignments || [])) {
-      all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon });
+      all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon, classInactive });
     }
     for (const lec of (cls.lectures || [])) {
       for (const a of (lec.assignments || [])) {
-        all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon, lectureId: lec.id });
+        all.push({ ...a, classId: cls.id, classCode: cls.code, colorIndex: cls.colorIndex, classIcon: cls.icon, classInactive, lectureId: lec.id });
       }
     }
   }
@@ -914,6 +921,9 @@ function getGlobalAssignments(sem, { classId = null, type = null, showDone = fal
   if (classId)        items = items.filter(a => a.classId === classId);
   if (type)            items = items.filter(a => a.type === type);
   if (!showDone)        items = items.filter(a => a.status !== 'done');
+  // Inactive classes' leftovers only show when asked for: Show done, or the
+  // class picked in the filter.
+  if (!showDone && !classId) items = items.filter(a => !a.classInactive);
 
   const STATUS_ORDER = { 'overdue': 0, 'today': 1, 'soon': 2, 'upcoming': 3, 'done': 4, 'none': 5 };
   const getUrgency = (a) => a.dueDate ? (getDueInfo(a.dueDate)?.urgency || 'upcoming') : 'none';
@@ -3351,6 +3361,10 @@ class HoldCourseView extends ItemView {
     // Class name
     const nameRow = body.createDiv('hc-class-name-row');
     nameRow.createSpan({ cls: 'hc-class-name', text: cls.name });
+    const inactive = isClassInactive(cls);
+    if (inactive) {
+      nameRow.createSpan({ cls: 'hc-class-status-tag', text: classStatusLabel(cls.status).toUpperCase() });
+    }
     if (cls.courseUrl) {
       const urlBtn = nameRow.createEl('a', { cls: 'hc-class-url-btn', href: cls.courseUrl });
       urlBtn.setAttribute('target', '_blank');
@@ -3403,7 +3417,11 @@ class HoldCourseView extends ItemView {
 
     // Next assignment — #56: this block names a specific assignment, so it
     // opens that assignment, not the class the rest of the card opens.
-    if (next) {
+    // An inactive class has nothing to chase, so no red due date.
+    if (inactive) {
+      body.createDiv({ cls: 'hc-class-next-label', text: `Class ${classStatusLabel(cls.status).toLowerCase()}` });
+      body.createDiv({ cls: 'hc-class-next-title', text: '—' });
+    } else if (next) {
       const info = getDueInfo(next.dueDate);
       const nextBlock = body.createDiv('hc-class-next hc-class-next--clickable');
       nextBlock.createDiv({ cls: 'hc-class-next-label', text: 'Next assignment due' });
@@ -5672,7 +5690,7 @@ class HoldCourseView extends ItemView {
       const color     = getColor(cls.colorIndex);
 
       const row = list.createDiv('hc-assign-row');
-      if (a.status === 'done') row.addClass('hc-assign-row--done');
+      if (a.status === 'done' || a.classInactive) row.addClass('hc-assign-row--done');
 
       // Type pill
       renderTypePill(row, a.type);
@@ -5696,6 +5714,7 @@ class HoldCourseView extends ItemView {
           lecLabel     = `L${num} — ${lec.title}`;
         }
       }
+      if (a.classInactive) lecLabel += ` · Class ${classStatusLabel(cls.status).toLowerCase()}`;
       contextRow.createSpan({ cls: 'hc-assign-lecture', text: ` · ${lecLabel}` });
 
       if (a.status === 'done' && (a.grade || '').trim()) {
