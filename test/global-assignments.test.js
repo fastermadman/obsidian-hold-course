@@ -82,3 +82,11 @@ test('empty semester returns an empty array, not a throw', () => {
   const result = getGlobalAssignments({ classes: [] });
   assert.deepEqual(result, []);
 });
+
+test('a dropped class is hidden unless Show done is on or it is the filtered class', () => {
+  const sem = makeSemester();
+  sem.classes[1].status = 'dropped';
+  assert.deepEqual(getGlobalAssignments(sem).map(a => a.id), ['a3', 'a1']);
+  assert.ok(getGlobalAssignments(sem, { showDone: true }).some(a => a.id === 'a4' && a.classInactive));
+  assert.deepEqual(getGlobalAssignments(sem, { classId: 'c2' }).map(a => a.id), ['a4']);
+});
