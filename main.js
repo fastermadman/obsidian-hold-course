@@ -1860,9 +1860,43 @@ class HoldCoursePlugin extends Plugin {
     if (cls) Object.assign(cls, updates);
   }
 
+  // #85 (from upstream 1.9.2/1.9.3): ids of resources that a class other
+  // than classId still needs by linkedBook, tagged to it or not.
+  _linkedElsewhere(sem, classId) {
+    const out = new Set();
+    for (const c of (sem.classes || [])) {
+      if (c.id === classId) continue;
+      for (const a of this._allClassAssignments(c)) if (a.linkedBook) out.add(a.linkedBook);
+    }
+    return out;
+  }
+
+  // Resources tagged to classId, split by what deleting the class does to
+  // them: used only by this class → deleted; still tagged to another live
+  // class or linked from one → kept, just untagged.
+  _classResourcePlan(semesterId, classId) {
+    const sem = (this.data.semesters || []).find(s => s.id === semesterId);
+    if (!sem) return { toDelete: [], toUntag: [] };
+    const liveIds = new Set((sem.classes || []).map(c => c.id));
+    const linked = this._linkedElsewhere(sem, classId);
+    const toDelete = [], toUntag = [];
+    for (const r of (sem.resources || [])) {
+      const ids = r.classIds || [];
+      if (!ids.includes(classId)) continue;
+      const others = ids.filter(id => id !== classId && liveIds.has(id));
+      (others.length === 0 && !linked.has(r.id) ? toDelete : toUntag).push(r);
+    }
+    return { toDelete, toUntag };
+  }
+
   deleteClass(semesterId, classId) {
     const sem = this.data.semesters.find(s => s.id === semesterId);
-    if (sem) sem.classes = sem.classes.filter(c => c.id !== classId);
+    if (!sem) return;
+    const { toDelete, toUntag } = this._classResourcePlan(semesterId, classId);
+    for (const r of toUntag) r.classIds = (r.classIds || []).filter(id => id !== classId);
+    const gone = new Set(toDelete.map(r => r.id));
+    sem.resources = (sem.resources || []).filter(r => !gone.has(r.id));
+    sem.classes = sem.classes.filter(c => c.id !== classId);
   }
 
   findClass(semesterId, classId) {
@@ -1914,10 +1948,14 @@ class HoldCoursePlugin extends Plugin {
 
     if (!target.resources) target.resources = [];
     const idMap = new Map();
+    // #85 (from upstream 1.9.3): a staying class's reading can link a book
+    // without tagging it; moving that record broke the reading's link.
+    const liveIds = new Set((source.classes || []).map(c => c.id));
+    const linkedElsewhere = this._linkedElsewhere(source, classId);
 
     for (const res of relevant) {
       const remaining = (res.classIds || []).filter(id => id !== classId);
-      if (remaining.length === 0) {
+      if (!remaining.some(id => liveIds.has(id)) && !linkedElsewhere.has(res.id)) {
         // Nothing left behind needs it — move the record itself. Same id, so
         // linkedBook keeps resolving with no remap.
         source.resources = source.resources.filter(r => r.id !== res.id);
@@ -2134,9 +2172,23 @@ class HoldCoursePlugin extends Plugin {
     if (resource) Object.assign(resource, updates);
   }
 
+  // Readings that use resourceId as their linked book.
+  _resourceBookRefs(semesterId, resourceId) {
+    const sem = this.data.semesters.find(s => s.id === semesterId);
+    const refs = [];
+    for (const c of (sem ? sem.classes || [] : [])) {
+      for (const a of this._allClassAssignments(c)) if (a.linkedBook === resourceId) refs.push(a);
+    }
+    return refs;
+  }
+
+  // #85 (from upstream 1.9.3): readings that linked the deleted book used to
+  // show "Book missing from Library"; now they just lose the link.
   deleteResource(semesterId, resourceId) {
     const sem = this.data.semesters.find(s => s.id === semesterId);
-    if (sem) sem.resources = (sem.resources || []).filter(r => r.id !== resourceId);
+    if (!sem) return;
+    for (const a of this._resourceBookRefs(semesterId, resourceId)) a.linkedBook = '';
+    sem.resources = (sem.resources || []).filter(r => r.id !== resourceId);
   }
 
   findResource(semesterId, resourceId) {
@@ -7224,9 +7276,14 @@ class DeleteClassModal extends Modal {
     contentEl.empty();
     contentEl.addClass('hc-modal');
     contentEl.createEl('h2', { cls: 'hc-modal-title', text: 'Delete class' });
+    const { toDelete, toUntag } = this.plugin._classResourcePlan(this.semesterId, this.cls.id);
+    const n = (k, word) => `${k} ${word}${k === 1 ? '' : 's'}`;
+    let library = '';
+    if (toDelete.length) library += ` ${n(toDelete.length, 'Library resource')} used only by this class will be deleted.`;
+    if (toUntag.length) library += ` ${n(toUntag.length, 'Library resource')} shared with other classes will be kept.`;
     contentEl.createEl('p', {
       cls: 'hc-modal-body',
-      text: `Delete "${this.cls.code} — ${this.cls.name}"? All lectures, assignments, exams, and resources for this class will be removed. This cannot be undone.`,
+      text: `Delete "${this.cls.code} — ${this.cls.name}"? All lectures, assignments, and exams for this class will be removed.${library} This cannot be undone.`,
     });
 
     const footer = contentEl.createDiv('hc-modal-footer');
@@ -8748,7 +8805,11 @@ class DeleteResourceModal extends Modal {
     contentEl.createEl('h2', { cls: 'hc-modal-title', text: 'Delete resource' });
     contentEl.createEl('p', {
       cls: 'hc-modal-body',
-      text: `Delete "${this.resource.title}"? This cannot be undone.`,
+      text: (() => {
+        const k = this.plugin._resourceBookRefs(this.semesterId, this.resource.id).length;
+        const refs = k ? ` It's the linked book for ${k} reading${k === 1 ? '' : 's'}. Those readings stay, without a linked book.` : '';
+        return `Delete "${this.resource.title}"?${refs} This cannot be undone.`;
+      })(),
     });
 
     const footer = contentEl.createDiv('hc-modal-footer');
