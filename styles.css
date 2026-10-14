@@ -2454,6 +2454,9 @@
 
 .hc-cal-cell--today {
   background: var(--background-secondary);
+  /* Inset ring instead of border: the cell keeps its size, and the ring still
+     reads in grayscale where the accent tint alone does not. */
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
 
 .hc-cal-cell--today.hc-cal-cell--has-items:hover {
@@ -2473,7 +2476,15 @@
 }
 
 .hc-cal-date-num--today {
-  color: var(--text-normal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin: -3px 0 1px -3px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
   font-weight: 700;
 }
 
@@ -2516,7 +2527,11 @@
 }
 
 .hc-cal-week-header--today {
-  background: var(--background-modifier-border);
+  background: var(--interactive-accent);
+}
+
+.hc-cal-week-header--today .hc-cal-week-header-day {
+  color: var(--text-on-accent);
 }
 
 .hc-cal-week-header-day {
@@ -2536,8 +2551,8 @@
 }
 
 .hc-cal-week-header--today .hc-cal-week-header-date {
-  color: var(--text-normal);
-  font-weight: 600;
+  color: var(--text-on-accent);
+  font-weight: 700;
 }
 
 .hc-cal-week-cell {
@@ -2552,6 +2567,7 @@
 
 .hc-cal-week-cell--today {
   background: var(--background-secondary);
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
 
 .hc-cal-week-cell--has-items {
@@ -2892,6 +2908,28 @@ body.hc-eink .hc-today-root {
 /* .hc-today-item-meta (class code + lecture/assignment type — load-bearing,
    not decorative) dims via opacity instead of --text-muted/--text-faint, so
    the var swap above doesn't reach it. */
+/* Today in the calendar: the accent colour can land on any grey (or a washed-out
+   one) on a colour-filtered panel, so e-ink uses the highest-contrast pair
+   instead, which is also what makes the ring and fill legible without colour. */
+body.hc-eink .hc-cal-cell--today,
+body.hc-eink .hc-cal-week-cell--today {
+  box-shadow: inset 0 0 0 2px var(--text-normal);
+}
+
+body.hc-eink .hc-cal-date-num--today {
+  background: var(--text-normal);
+  color: var(--background-primary);
+}
+
+body.hc-eink .hc-cal-week-header--today {
+  background: var(--text-normal);
+}
+
+body.hc-eink .hc-cal-week-header--today .hc-cal-week-header-day,
+body.hc-eink .hc-cal-week-header--today .hc-cal-week-header-date {
+  color: var(--background-primary);
+}
+
 body.hc-eink .hc-today-item-meta {
   opacity: 1;
 }
