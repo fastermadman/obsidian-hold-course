@@ -2454,6 +2454,7 @@
 
 .hc-cal-cell--today {
   background: var(--background-secondary);
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
 }
 
 .hc-cal-cell--today.hc-cal-cell--has-items:hover {
@@ -2473,8 +2474,17 @@
 }
 
 .hc-cal-date-num--today {
-  color: var(--text-normal);
+  color: var(--text-on-accent);
   font-weight: 700;
+  background: var(--interactive-accent);
+  border-radius: 50%;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  display: inline-block;
+  padding: 0 2px;
+  box-sizing: border-box;
 }
 
 .hc-cal-pill {
@@ -2517,6 +2527,7 @@
 
 .hc-cal-week-header--today {
   background: var(--background-modifier-border);
+  box-shadow: inset 0 -3px 0 var(--interactive-accent);
 }
 
 .hc-cal-week-header-day {
@@ -2536,8 +2547,12 @@
 }
 
 .hc-cal-week-header--today .hc-cal-week-header-date {
-  color: var(--text-normal);
-  font-weight: 600;
+  color: var(--interactive-accent);
+  font-weight: 700;
+}
+
+.hc-cal-week-header--today .hc-cal-week-header-day {
+  color: var(--interactive-accent);
 }
 
 .hc-cal-week-cell {
@@ -2552,6 +2567,24 @@
 
 .hc-cal-week-cell--today {
   background: var(--background-secondary);
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+/* E-ink / greyscale: accent hue is lost, so rely on solid black/white and borders. */
+body.hc-eink .hc-cal-date-num--today {
+  background: #000;
+  color: #fff;
+}
+body.hc-eink .hc-cal-cell--today,
+body.hc-eink .hc-cal-week-cell--today {
+  box-shadow: inset 0 0 0 3px #000;
+}
+body.hc-eink .hc-cal-week-header--today {
+  box-shadow: inset 0 -4px 0 #000;
+}
+body.hc-eink .hc-cal-week-header--today .hc-cal-week-header-date,
+body.hc-eink .hc-cal-week-header--today .hc-cal-week-header-day {
+  color: #000;
 }
 
 .hc-cal-week-cell--has-items {
