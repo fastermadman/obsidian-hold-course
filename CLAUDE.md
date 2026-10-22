@@ -16,3 +16,7 @@ Brug Obsidians egen move (`mcp__enquire__obsidian_rename_note`, eller Local REST
 `MOVE`-verb med `Destination`-header). Ikke `mv`/`cp`, ikke `mcp__filesystem__move_file`.
 Grunden: Obsidians move opdaterer `[[wikilinks]]` andre steder i vaulten; en rå
 filsystem-flytning efterlader døde links.
+
+## Lukke issues via PR
+
+PR-beskrivelsen skal have `Closes #N` (engelsk nøgleord; "Lukker" virker ikke), ét nøgleord pr. issue, og PR skal merges til main. Delvis løsning: `Refs #N`. Se `.github/pull_request_template.md`.
