@@ -1,5 +1,7 @@
 # Hold Course
 
+> This is a fork of [LiveAQuietLife/obsidian-hold-course](https://github.com/LiveAQuietLife/obsidian-hold-course) (MIT), published as plugin id `its-hold-course` so it can live next to the original. Install via BRAT: `FasterMadman/obsidian-hold-course`. If an old `plugins/hold-course/data.json` exists, it is copied on first load.
+
 Always know where you are.
 
 ---

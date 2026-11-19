@@ -1366,7 +1366,27 @@ function normalizeSettings(obj, defaultScale) {
 }
 
 class HoldCoursePlugin extends Plugin {
+  // #86: the plugin id changed from 'hold-course' to 'its-hold-course', so Obsidian looks in a
+  // new folder. If this one has no data.json yet, copy the old folder's files over raw (text in,
+  // same text out; ItsWiz compares data.json as text). Never overwrites, never deletes the old folder.
+  async _migrateLegacyData() {
+    try {
+      const adapter = this.app.vault.adapter;
+      const dir = this.manifest.dir;
+      const oldDir = dir.replace(/[^/]+$/, 'hold-course');
+      if (oldDir === dir || await adapter.exists(`${dir}/data.json`)) return;
+      for (const f of ['data.json', 'device-settings.json']) {
+        if (await adapter.exists(`${oldDir}/${f}`) && !(await adapter.exists(`${dir}/${f}`))) {
+          await adapter.write(`${dir}/${f}`, await adapter.read(`${oldDir}/${f}`));
+        }
+      }
+    } catch (e) {
+      console.error('Hold Course: legacy data migration failed', e);
+    }
+  }
+
   async onload() {
+    await this._migrateLegacyData();
     this.data = await this.loadData() || { currentSemesterId: null, semesters: [] };
     const defaultScale = Platform.isMobile ? 1.1 : 1.0;
 
