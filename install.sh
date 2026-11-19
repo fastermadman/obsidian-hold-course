@@ -18,16 +18,15 @@
 # som hverken dette script eller reconcilen rører. Dette script skal derfor stadig
 # holde fingrene væk fra data.json.
 #
-# manifest.json kopieres IKKE: repoets manifest har isDesktopOnly: true
-# (se issue #4, ikke løst i koden endnu), men enhedens kopi er patchet til
-# isDesktopOnly: false lokalt — ellers loader pluginet slet ikke på Android.
+# manifest.json kopieres nu med (#86): repoets manifest har isDesktopOnly: false,
+# så enhedens lokale patch er ikke længere nødvendig.
 set -e
 
 VAULT="${1:-$HOME/ViaVault}"
-DEST="$VAULT/.obsidian-onyx/plugins/hold-course"
+DEST="$VAULT/.obsidian-onyx/plugins/its-hold-course"
 
 cd "$(dirname "$0")"
 [ -d "$DEST" ] || { echo "Findes ikke: $DEST"; exit 1; }
 
-cp main.js styles.css "$DEST/"
+cp main.js manifest.json styles.css "$DEST/"
 echo "✓ .obsidian-onyx  →  $(wc -c < "$DEST/main.js" | tr -d ' ') bytes — husk at synce til Boox og genindlæse pluginet"
