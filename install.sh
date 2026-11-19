@@ -26,7 +26,7 @@ VAULT="${1:-$HOME/ViaVault}"
 DEST="$VAULT/.obsidian-onyx/plugins/its-hold-course"
 
 cd "$(dirname "$0")"
-[ -d "$DEST" ] || { echo "Findes ikke: $DEST"; exit 1; }
+mkdir -p "$DEST"
 
 cp main.js manifest.json styles.css "$DEST/"
 echo "✓ .obsidian-onyx  →  $(wc -c < "$DEST/main.js" | tr -d ' ') bytes — husk at synce til Boox og genindlæse pluginet"
